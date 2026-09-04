@@ -1,0 +1,303 @@
+/* Compact non-overflow fallback and reduced-motion behavior. */
+
+:where(button, [href], [tabindex], .grid-cell):focus-visible {
+  outline: 3px solid var(--mint);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(6, 23, 25, 0.9), 0 0 0 7px rgba(127, 211, 179, 0.55);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes banner-reveal {
+  from { opacity: 0; transform: translate(-50%, -44%) scale(0.96); }
+  30%, 72% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(-50%, -56%) scale(1.02); }
+}
+
+@media (min-width: 901px) {
+  body {
+    display: grid;
+    min-height: 100svh;
+    padding: clamp(0px, 1vh, 12px);
+    place-items: center;
+  }
+
+  .game-shell {
+    width: min(calc((100svh - 24px) * 1.6), calc(100vw - 24px), 1586px);
+    min-height: 0;
+    aspect-ratio: 8 / 5;
+  }
+}
+
+@media (max-width: 1120px) and (min-width: 701px) {
+  :root {
+    --control-size: 44px;
+  }
+
+  .top-hud {
+    grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+  }
+
+  .operator-dock {
+    left: 18%;
+    right: 4.5%;
+  }
+
+  .operator-card {
+    min-width: 120px;
+  }
+
+  .operator-desc {
+    display: none;
+  }
+
+  .battle-grid {
+    right: 13%;
+    left: 15%;
+  }
+
+  .enemy-chip {
+    left: 75%;
+  }
+}
+
+@media (max-width: 900px) {
+  body {
+    display: block;
+    min-height: 100svh;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  .game-shell {
+    width: 100%;
+    min-height: 100svh;
+    aspect-ratio: auto;
+    overflow: hidden;
+    border-inline: 0;
+  }
+
+  .top-hud {
+    position: relative;
+    top: auto;
+    min-height: 94px;
+    padding: 8px 10px;
+    grid-template-columns: minmax(170px, 1fr) auto;
+    grid-template-rows: 44px 34px;
+    gap: 4px 10px;
+  }
+
+  .brand-lockup {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .brand-title {
+    font-size: clamp(20px, 6vw, 28px);
+  }
+
+  .brand-orbit {
+    width: 38px;
+  }
+
+  .hud-cluster {
+    display: flex;
+    min-width: 0;
+    grid-column: 1;
+    grid-row: 2;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .wave-progress {
+    min-width: 92px;
+    grid-column: auto;
+    grid-row: auto;
+    font-size: 14px;
+  }
+
+  .hud-stat,
+  .hud-stat:first-of-type,
+  .hud-stat:last-of-type {
+    min-height: 32px;
+    padding: 2px 6px;
+    grid-column: auto;
+    grid-row: auto;
+    border-block: 1px solid rgba(229, 169, 77, 0.36);
+    color: var(--parchment);
+    font-size: 14px;
+  }
+
+  .hud-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .battle-layout {
+    display: grid;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: clamp(560px, 75vw, 660px) auto;
+    overflow: hidden;
+  }
+
+  .battle-stage {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: auto;
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .battlefield {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    background-position: center;
+    background-size: cover;
+  }
+
+  .battle-grid {
+    top: 176px;
+    right: 4%;
+    bottom: 48px;
+    left: 15%;
+  }
+
+  .operator-dock,
+  .game-shell > .operator-dock,
+  .battle-layout > .operator-dock,
+  .battle-stage > .operator-dock {
+    position: absolute;
+    z-index: 30;
+    top: 8px;
+    right: 8px;
+    bottom: auto;
+    left: 15%;
+    display: grid;
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .game-shell > .operator-dock {
+    top: 102px;
+  }
+
+  .operator-scroll {
+    display: flex;
+    width: 100%;
+    gap: 7px;
+    padding: 2px 2px 7px;
+    overflow-x: auto;
+    pointer-events: auto;
+    scroll-snap-type: none;
+  }
+
+  .operator-card {
+    width: 148px;
+    min-width: 148px;
+    height: 146px;
+    padding: 7px;
+    scroll-snap-align: none;
+  }
+
+  .operator-desc {
+    display: none;
+  }
+
+  .workbench {
+    position: relative;
+    width: 100%;
+    max-height: none;
+    padding: 12px;
+    grid-column: 1;
+    grid-row: 2;
+    overflow: visible;
+    border-top: 1px solid var(--brass-dark);
+    border-left: 0;
+    box-shadow: 0 -8px 22px rgba(0, 0, 0, 0.35);
+  }
+
+  .workbench .formula-panel,
+  .battle-layout > .formula-panel {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    min-width: 0;
+    max-height: none;
+    margin: 0;
+  }
+
+  .bottom-bar {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    display: flex;
+    width: 100%;
+    padding: 8px;
+    flex-wrap: wrap;
+    background: var(--ink);
+  }
+
+  .toast-stack {
+    top: 12px;
+    right: 12px;
+    bottom: auto;
+    left: auto;
+    width: min(360px, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 520px) {
+  .top-hud {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .hud-cluster {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .hud-cluster::-webkit-scrollbar {
+    display: none;
+  }
+
+  .battle-layout {
+    grid-template-rows: 560px auto;
+  }
+
+  .operator-dock,
+  .game-shell > .operator-dock,
+  .battle-layout > .operator-dock,
+  .battle-stage > .operator-dock {
+    left: 8px;
+  }
+
+  .battle-grid {
+    top: 174px;
+    right: 2%;
+    bottom: 42px;
+    left: 12%;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

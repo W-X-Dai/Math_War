@@ -1,0 +1,431 @@
+/* Five-lane board, combat entities, effects, and sprite artwork. */
+
+.battlefield {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.battlefield {
+  overflow: hidden;
+  background-color: var(--teal-deep);
+  background-image: url("/assets/battlefield.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  touch-action: manipulation;
+}
+
+.tower-layer,
+.enemy-layer,
+.effect-layer {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.enemy-layer {
+  z-index: 12;
+}
+
+.effect-layer {
+  z-index: 18;
+}
+
+.tower-layer > *,
+.enemy-layer > * {
+  pointer-events: auto;
+}
+
+.lane-labels {
+  position: absolute;
+  z-index: 7;
+  top: clamp(196px, 17.5cqw, 276px);
+  bottom: clamp(96px, 7.4cqw, 118px);
+  left: max(8px, 12.5%);
+  display: grid;
+  width: 34px;
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  pointer-events: none;
+}
+
+.lane-labels span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-self: center;
+  place-items: center;
+  border: 1px solid var(--brass-dark);
+  border-radius: 50%;
+  background: rgba(2, 17, 19, 0.88);
+  color: var(--parchment);
+  font: 700 0.9rem/1 var(--font-display);
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.46);
+}
+
+.battle-grid {
+  position: absolute;
+  z-index: 4;
+  top: clamp(196px, 17.5cqw, 276px);
+  right: 5%;
+  bottom: clamp(96px, 7.4cqw, 118px);
+  left: 16.5%;
+  display: grid;
+  grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--grid-rows), minmax(0, 1fr));
+}
+
+.grid-cell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid rgba(184, 203, 175, 0.28);
+  border-radius: 5px;
+  background: rgba(41, 91, 84, 0.14);
+  box-shadow: inset 0 0 12px rgba(127, 211, 179, 0.04);
+  cursor: pointer;
+}
+
+.grid-cell > span {
+  color: rgba(241, 223, 182, 0.34);
+  font: 400 clamp(13px, 1.3cqw, 20px) / 1 var(--font-display);
+}
+
+.grid-cell.is-path-only {
+  background: rgba(6, 23, 25, 0.05);
+  cursor: default;
+}
+
+.grid-cell.is-path-only > span {
+  visibility: hidden;
+}
+
+.grid-cell:hover:not(:disabled) {
+  border-color: rgba(241, 223, 182, 0.62);
+  background: rgba(127, 211, 179, 0.09);
+}
+
+.grid-cell.is-placeable {
+  border-color: var(--mint);
+  background: rgba(127, 211, 179, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(127, 211, 179, 0.32), 0 0 14px rgba(127, 211, 179, 0.2);
+}
+
+.grid-cell.is-invalid {
+  border-color: var(--coral);
+  background: rgba(232, 111, 90, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(232, 111, 90, 0.3), 0 0 12px rgba(232, 111, 90, 0.18);
+  cursor: not-allowed;
+}
+
+.targeting-mode .grid-cell {
+  cursor: crosshair;
+}
+
+.battlefield.has-targeting .enemy.is-targetable {
+  filter: drop-shadow(0 0 12px rgba(127, 211, 179, 0.8)) drop-shadow(0 9px 6px rgba(0, 0, 0, 0.56));
+}
+
+.targeting-mode {
+  position: absolute;
+  z-index: 44;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  min-height: 44px;
+  padding: 7px 9px 7px 13px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--mint);
+  border-radius: 2px;
+  background: rgba(3, 25, 27, 0.96);
+  box-shadow: 0 0 18px rgba(127, 211, 179, 0.25), 0 7px 18px rgba(0, 0, 0, 0.5);
+  color: var(--mint);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.targeting-mode[hidden] {
+  display: none;
+}
+
+.targeting-mode button {
+  min-width: 44px;
+  min-height: 32px;
+  border: 1px solid var(--brass-dark);
+  border-radius: 2px;
+  background: var(--ink-deep);
+  color: var(--parchment);
+  cursor: pointer;
+}
+
+.danger-preview {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid var(--coral);
+  background: rgba(232, 111, 90, 0.12);
+  box-shadow: 0 0 18px rgba(232, 111, 90, 0.3);
+  pointer-events: none;
+}
+
+.tower,
+.enemy {
+  position: absolute;
+  z-index: 10;
+  top: calc(40% + (var(--row, 0) * 10%));
+  left: var(--x, 50%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+  transform-origin: 50% 80%;
+}
+
+.tower {
+  width: clamp(64px, 8.2%, 124px);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
+  transform: translate(-50%, -50%);
+}
+
+.tower-sprite {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+}
+
+.tower-status {
+  position: absolute;
+  right: 8%;
+  bottom: 2%;
+  left: 8%;
+  height: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(2, 13, 15, 0.8);
+  background: rgba(2, 13, 15, 0.76);
+}
+
+.tower-status > span {
+  display: block;
+  width: var(--status, 100%);
+  height: 100%;
+  background: var(--mint);
+}
+
+.tower-status > i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--mint);
+}
+
+.tower.is-firing {
+  filter: drop-shadow(0 0 12px rgba(255, 211, 124, 0.86)) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
+}
+
+.tower.is-paused {
+  filter: grayscale(0.7) brightness(0.64) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
+}
+
+.tower-slot {
+  position: absolute;
+  z-index: 4;
+  top: -6px;
+  right: -5px;
+  display: grid;
+  min-width: 46px;
+  max-width: 92px;
+  height: 30px;
+  padding: 3px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--brass-dark);
+  border-radius: 2px;
+  background: rgba(2, 13, 15, 0.92);
+  color: var(--parchment-dim);
+  font: 700 0.7rem/1 var(--font-math);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.54);
+}
+
+.tower:not(.is-configurable) .tower-slot {
+  display: none;
+}
+
+.tower-slot.is-empty,
+.tower.is-configurable:not(.is-filled) .tower-slot {
+  border-style: dashed;
+  color: var(--brass);
+}
+
+.tower-slot.is-filled,
+.tower.is-filled .tower-slot {
+  border-color: var(--mint);
+  color: var(--mint);
+  box-shadow: 0 0 10px rgba(127, 211, 179, 0.34), 0 3px 8px rgba(0, 0, 0, 0.54);
+}
+
+.tower.is-configurable {
+  cursor: cell;
+}
+
+.tower.is-configurable:hover,
+.tower.is-configurable:focus-visible,
+.tower.is-awaiting-assembly,
+.is-awaiting-assembly .tower.is-configurable {
+  filter: drop-shadow(0 0 13px rgba(127, 211, 179, 0.8)) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
+}
+
+.enemy {
+  width: clamp(105px, 15%, 238px);
+  aspect-ratio: 3 / 2;
+  cursor: pointer;
+  filter: drop-shadow(0 9px 6px rgba(0, 0, 0, 0.56));
+  transform: translate(-50%, -50%);
+}
+
+.enemy:hover,
+.enemy.is-selected {
+  filter: drop-shadow(0 0 9px rgba(255, 211, 124, 0.7)) drop-shadow(0 9px 6px rgba(0, 0, 0, 0.56));
+}
+
+.enemy.is-targetable {
+  cursor: crosshair;
+}
+
+.enemy.is-divergent {
+  filter: drop-shadow(0 0 13px rgba(232, 111, 90, 0.88)) drop-shadow(0 9px 6px rgba(0, 0, 0, 0.56));
+}
+
+.enemy.is-hit {
+  filter: brightness(1.35) drop-shadow(0 0 12px rgba(255, 211, 124, 0.92));
+}
+
+.enemy.is-vanishing {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.45);
+  transition: opacity 320ms ease, transform 320ms ease;
+}
+
+.enemy-sprite {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+}
+
+.enemy-chip {
+  position: absolute;
+  top: 50%;
+  left: 82%;
+  display: grid;
+  width: clamp(112px, 10.5cqw, 166px);
+  min-height: 56px;
+  padding: 7px 9px;
+  gap: 3px;
+  border: 1px solid var(--brass-dark);
+  border-radius: 2px;
+  background: rgba(3, 20, 22, 0.92);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.48);
+  transform: translateY(-50%);
+}
+
+.enemy-formula {
+  overflow: hidden;
+  color: var(--parchment);
+  font: italic 700 clamp(16px, 1.5cqw, 25px) / 1.05 var(--font-math);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enemy-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  color: var(--parchment-dim);
+  font-size: clamp(9px, 0.72cqw, 12px);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.damage-value {
+  color: var(--coral);
+  font-weight: 800;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.8);
+}
+
+.projectile {
+  position: absolute;
+  z-index: 14;
+  top: calc(40% + (var(--row, 0) * 10%));
+  left: var(--from, 20%);
+  width: max(28px, calc(var(--x, 50%) - var(--from, 20%)));
+  height: 3px;
+  border-radius: 999px;
+  background: var(--brass-bright);
+  box-shadow: 0 0 4px #fff3c4, 0 0 13px var(--brass), 0 0 24px rgba(229, 169, 77, 0.72);
+  pointer-events: none;
+}
+
+.projectile.subtract-projectile {
+  background: var(--coral);
+  box-shadow: 0 0 4px #ffd1c8, 0 0 13px var(--coral), 0 0 24px rgba(232, 111, 90, 0.66);
+}
+
+.combat-float {
+  position: absolute;
+  z-index: 35;
+  top: calc(40% + (var(--row, 0) * 10%));
+  left: var(--x, 50%);
+  color: var(--brass-bright);
+  font: 800 clamp(17px, 1.8cqw, 30px) / 1 var(--font-display);
+  pointer-events: none;
+  text-shadow: 0 2px 0 rgba(80, 34, 10, 0.9), 0 0 10px rgba(229, 169, 77, 0.48);
+  animation: combat-rise 850ms ease-out both;
+}
+
+.combat-float.is-damage {
+  color: var(--coral);
+}
+
+.combat-float[data-equation]::after {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  width: max-content;
+  max-width: 280px;
+  padding: 3px 7px;
+  border: 1px solid rgba(229, 169, 77, 0.45);
+  background: rgba(2, 17, 19, 0.9);
+  color: var(--parchment);
+  content: attr(data-equation);
+  font: 700 0.72rem/1.25 var(--font-math);
+  transform: translateX(-50%);
+}
+
+/* 2 × 2 enemy atlas: polynomial, brute / wave, exponential. */
+.enemy-art-polynomial,
+.enemy-art-brute,
+.enemy-art-wave,
+.enemy-art-exponential {
+  background-image: url("/assets/enemy-atlas.png");
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+}
+
+.enemy-art-polynomial { background-position: 0 0; }
+.enemy-art-brute { background-position: 100% 0; }
+.enemy-art-wave { background-position: 0 100%; }
+.enemy-art-exponential { background-position: 100% 100%; }
+
+@keyframes combat-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.94); }
+  28% { opacity: 1; }
+  to { opacity: 0; transform: translateY(-34px) scale(1.04); }
+}
+
+

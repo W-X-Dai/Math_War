@@ -1,0 +1,95 @@
+/* Theme tokens, reset, and accessibility utilities. */
+
+/*
+ * Visual system for Math Zombie / 微分防線.
+ * The game is intentionally framed like a brass scientific instrument rather
+ * than a dashboard: one continuous battlefield, inset controls, and compact UI.
+ */
+
+:root {
+  color-scheme: dark;
+  --ink: #061719;
+  --ink-deep: #020b0d;
+  --ink-panel: rgba(5, 23, 25, 0.94);
+  --ink-panel-soft: rgba(8, 38, 39, 0.88);
+  --teal: #16494a;
+  --teal-deep: #0a2d30;
+  --teal-line: #4f8178;
+  --brass: #e5a94d;
+  --brass-bright: #ffd37c;
+  --brass-dark: #81551f;
+  --parchment: #f1dfb6;
+  --parchment-dim: #cdbb91;
+  --coral: #e86f5a;
+  --mint: #7fd3b3;
+  --shadow: rgba(0, 0, 0, 0.58);
+  --font-display: "Noto Serif TC", "Songti TC", "PMingLiU", Georgia, serif;
+  --font-math: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+  --font-ui: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --frame-border: 1px solid rgba(229, 169, 77, 0.7);
+  --control-size: 46px;
+  --rail-width: clamp(286px, 19cqw, 310px);
+  --grid-columns: 8;
+  --grid-rows: 5;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--ink-deep);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--ink-deep);
+  color: var(--parchment);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: var(--brass);
+  color: var(--ink-deep);
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  border: 0 !important;
+  margin: -1px !important;
+  white-space: nowrap !important;
+}
+
+
