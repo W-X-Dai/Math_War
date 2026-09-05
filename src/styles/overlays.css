@@ -257,6 +257,123 @@
   flex-wrap: wrap;
 }
 
+.weapon-tutorial-modal {
+  width: min(100%, 650px);
+  padding: clamp(24px, 3.2vw, 40px);
+}
+
+.weapon-eyebrow {
+  margin: 0 0 12px;
+  color: var(--mint) !important;
+  font: 700 0.72rem/1 var(--font-ui);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.weapon-tutorial-main {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  align-items: center;
+  gap: 22px;
+}
+
+.weapon-tutorial-art {
+  width: 132px;
+  height: 104px;
+  border: 1px solid rgba(229, 169, 77, 0.42);
+  background-color: rgba(2, 17, 19, 0.72);
+  background-size: 300% 200%;
+  box-shadow: inset 0 0 18px rgba(229, 169, 77, 0.08);
+}
+
+.weapon-symbol {
+  color: var(--mint);
+  font: 700 1rem/1 var(--font-math);
+}
+
+.weapon-tutorial-modal h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(29px, 3vw, 42px);
+}
+
+.weapon-tutorial-modal p {
+  margin: 0;
+}
+
+.weapon-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 22px 0 14px;
+  border-block: 1px solid rgba(229, 169, 77, 0.28);
+}
+
+.weapon-facts div {
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.weapon-facts div + div {
+  border-left: 1px solid rgba(229, 169, 77, 0.2);
+}
+
+.weapon-facts dt {
+  color: var(--parchment-dim);
+  font: 0.68rem/1.2 var(--font-ui);
+}
+
+.weapon-facts dd {
+  margin: 5px 0 0;
+  color: var(--brass-bright);
+  font: 700 0.86rem/1.25 var(--font-ui);
+}
+
+.weapon-tutorial-note {
+  color: var(--parchment-dim);
+  font-size: 0.72rem;
+}
+
+.weapon-steps {
+  display: grid;
+  margin: 0 0 12px;
+  padding-left: 22px;
+  gap: 7px;
+  color: var(--parchment);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.weapon-steps li::marker {
+  color: var(--brass-bright);
+  font-family: var(--font-display);
+  font-weight: 800;
+}
+
+.weapon-tutorial-modal > .primary-button {
+  margin-top: 18px;
+  margin-left: auto;
+}
+
+@media (max-width: 700px) {
+  .weapon-tutorial-main {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .weapon-tutorial-art {
+    width: 92px;
+    height: 78px;
+  }
+
+  .weapon-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .weapon-facts div + div {
+    border-top: 1px solid rgba(229, 169, 77, 0.2);
+    border-left: 0;
+  }
+}
+
 .danger-preview ul {
   max-height: 260px;
   margin: 14px 0 0;

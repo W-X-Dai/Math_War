@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 
+import { OPERATORS } from '../game/content.js';
 import { partialPreview } from '../game/engine.js';
 import { formatValue, prettyFormula } from '../ui/format.js';
 import GameIcon from './GameIcon.vue';
@@ -9,9 +10,43 @@ const props = defineProps({
   state: { type: Object, required: true },
 });
 
-defineEmits(['start', 'cancel', 'confirm-partial', 'pause', 'restart-same', 'restart-new']);
+defineEmits([
+  'start', 'cancel', 'confirm-partial', 'advance-weapon-tutorial',
+  'pause', 'restart-same', 'restart-new',
+]);
 
 const preview = computed(() => (props.state.partialConfirmOpen ? partialPreview(props.state) : []));
+const newWeapon = computed(() => OPERATORS[props.state.weaponTutorialQueue?.[0]] ?? null);
+const weaponUsage = computed(() => {
+  if (newWeapon.value?.kind === 'tower') return '持續型砲台';
+  if (newWeapon.value?.kind === 'global') return '全場一次性武器';
+  return '單體一次性武器';
+});
+const counterLabels = computed(() => {
+  const labels = {
+    polynomial: '多項式', constant: '常數項', higherOrder: '高階式', multivariable: '多變數',
+    rational: '分式', logarithmic: '對數', trigonometric: '三角式', exponential: '指數式',
+  };
+  return (newWeapon.value?.counterTags ?? []).map((tag) => labels[tag] ?? tag).join('、');
+});
+const weaponSteps = computed(() => {
+  const configurable = ['definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'];
+  if (configurable.includes(newWeapon.value?.id)) {
+    return [
+      '先從軍械 Queue 選牌，再點亮地圖空格部署。',
+      newWeapon.value.id === 'definiteIntegralTower'
+        ? '在工坊組出上下界，從常數庫依序各裝入一次。'
+        : '在工坊組出需要的數值，從常數庫選取後點塔裝入。',
+    ];
+  }
+  if (newWeapon.value?.kind === 'tower') {
+    return ['從軍械 Queue 選牌，再點亮地圖空格部署。', '砲台會持續攻擊同一路最前方的敵人。'];
+  }
+  if (newWeapon.value?.kind === 'global') {
+    return ['從軍械 Queue 選牌，先查看全場公式預覽。', '確認施放後才消耗卡片與算力；每輪限用一次。'];
+  }
+  return ['從軍械 Queue 選牌，再點擊一隻敵人施放。', '目標無效或算力不足時不會消耗卡片。'];
+});
 </script>
 
 <template>
@@ -64,6 +99,41 @@ const preview = computed(() => (props.state.partialConfirmOpen ? partialPreview(
       <button class="primary-button intro-button" type="button" data-action="start" @click="$emit('start')">
         開始演算 <GameIcon name="arrow" />
       </button>
+    </article>
+  </div>
+
+  <div
+    v-else-if="newWeapon && state.phase === 'preparing'"
+    class="overlay weapon-tutorial-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="weapon-tutorial-title"
+  >
+    <article class="modal weapon-tutorial-modal">
+      <p class="weapon-eyebrow">第 {{ state.chapterIndex + 1 }} 章新軍械</p>
+      <div class="weapon-tutorial-main">
+        <span class="weapon-tutorial-art operator-art" :class="newWeapon.art" aria-hidden="true"></span>
+        <div>
+          <span class="weapon-symbol">{{ newWeapon.symbol }}</span>
+          <h2 id="weapon-tutorial-title">{{ newWeapon.name }}</h2>
+          <p>{{ newWeapon.description }}</p>
+        </div>
+      </div>
+      <dl class="weapon-facts">
+        <div><dt>類型</dt><dd>{{ weaponUsage }}</dd></div>
+        <div><dt>算力</dt><dd>Σ {{ newWeapon.cost }}</dd></div>
+        <div><dt>適合</dt><dd>{{ counterLabels || '依公式判斷' }}</dd></div>
+      </dl>
+      <ol class="weapon-steps">
+        <li v-for="step in weaponSteps" :key="step">{{ step }}</li>
+      </ol>
+      <p class="weapon-tutorial-note">教學期間整備倒數與三條 Queue 都會暫停。</p>
+      <button
+        class="primary-button"
+        type="button"
+        data-action="advance-weapon-tutorial"
+        @click="$emit('advance-weapon-tutorial')"
+      >{{ state.weaponTutorialQueue.length > 1 ? `下一張（還有 ${state.weaponTutorialQueue.length - 1}）` : '開始整備' }} <GameIcon name="arrow" /></button>
     </article>
   </div>
 

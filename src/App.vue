@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 
 import {
+  advanceWeaponTutorial,
   applyTargetOperator,
   cancelSelection,
   confirmPartial,
@@ -9,6 +10,7 @@ import {
   discardArsenalItem,
   discardConstantItem,
   discardFormulaItem,
+  discardStoredConstant,
   discardTower,
   installAssembly,
   placeTower,
@@ -17,6 +19,7 @@ import {
   selectConstantItem,
   selectEnemy,
   selectFormulaItem,
+  selectStoredConstant,
   startGame,
   startWave,
   tick,
@@ -92,7 +95,11 @@ const actions = {
     return act(() => selectEnemy(game, enemyId));
   },
   tower: (towerId) => {
-    if (game.assemblyValue !== null) return act(() => installAssembly(game, towerId), 'success');
+    const tower = game.towers.find((candidate) => candidate.id === towerId);
+    const configurable = ['subtract', 'definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'];
+    if (game.selectedStoredConstantId !== null && configurable.includes(tower?.typeId)) {
+      return act(() => installAssembly(game, towerId), 'success');
+    }
     return act(() => toggleTower(game, towerId));
   },
   pause: () => act(() => togglePause(game)),
@@ -109,12 +116,15 @@ const actions = {
     tone('select');
   },
   confirmPartial: () => act(() => confirmPartial(game), 'success'),
+  advanceWeaponTutorial: () => act(() => advanceWeaponTutorial(game), 'success'),
   discardArsenal: (itemId) => act(() => discardArsenalItem(game, itemId), 'danger'),
   discardFormula: (itemId) => act(() => discardFormulaItem(game, itemId), 'danger'),
   discardConstant: (itemId) => act(() => discardConstantItem(game, itemId), 'danger'),
+  discardStoredConstant: (itemId) => act(() => discardStoredConstant(game, itemId), 'danger'),
   discardTower: (towerId) => act(() => discardTower(game, towerId), 'danger'),
   pickFormula: (itemId) => act(() => selectFormulaItem(game, itemId)),
   pickConstant: (itemId) => act(() => selectConstantItem(game, itemId)),
+  pickStoredConstant: (itemId) => act(() => selectStoredConstant(game, itemId)),
   prepareAssembly: () => act(() => prepareAssembly(game), 'success'),
   closeFormula: () => {
     game.selectedEnemyId = null;
@@ -157,6 +167,7 @@ function discardPayload({ kind, id }) {
   if (kind === 'arsenal') actions.discardArsenal(id);
   else if (kind === 'formula') actions.discardFormula(id);
   else if (kind === 'constant') actions.discardConstant(id);
+  else if (kind === 'stored-constant') actions.discardStoredConstant(id);
   else if (kind === 'tower') actions.discardTower(id);
 }
 
@@ -260,6 +271,7 @@ defineExpose({ game, actions });
         :drag-payload="dragPayload"
         @pick-formula="actions.pickFormula"
         @pick-constant="actions.pickConstant"
+        @pick-stored-constant="actions.pickStoredConstant"
         @prepare-assembly="actions.prepareAssembly"
       />
     </div>
@@ -276,6 +288,7 @@ defineExpose({ game, actions });
         @start="actions.start"
         @cancel="actions.cancel"
         @confirm-partial="actions.confirmPartial"
+        @advance-weapon-tutorial="actions.advanceWeaponTutorial"
         @pause="actions.pause"
         @restart-same="actions.restartSame"
         @restart-new="actions.restartNew"

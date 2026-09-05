@@ -324,7 +324,7 @@
   top: 50%;
   left: 82%;
   display: grid;
-  width: clamp(112px, 10.5cqw, 166px);
+  width: var(--chip-width, clamp(112px, 10.5cqw, 166px));
   min-height: 62px;
   padding: 7px 9px;
   gap: 3px;
@@ -332,7 +332,9 @@
   border-radius: 2px;
   background: rgba(3, 20, 22, 0.92);
   box-shadow: 0 5px 16px rgba(0, 0, 0, 0.48);
-  transform: translateY(-50%);
+  /* Only the information chip moves; the enemy sprite remains at its exact
+     simulation position. Dense same-lane chips fan across the available row. */
+  transform: translate(var(--stack-x, 0px), -50%);
 }
 
 .enemy-badges {

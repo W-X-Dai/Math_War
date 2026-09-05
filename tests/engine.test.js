@@ -9,13 +9,16 @@ import {
   trigonometric,
 } from '../src/domain/expression.js';
 import {
+  advanceWeaponTutorial,
   applyTargetOperator,
+  chapterWeaponTutorials,
   confirmPartial,
   createGame,
   currentAssembly,
   discardArsenalItem,
   discardConstantItem,
   discardFormulaItem,
+  discardStoredConstant,
   installAssembly,
   partialPreview,
   placeTower,
@@ -23,6 +26,7 @@ import {
   selectArsenalItem,
   selectConstantItem,
   selectFormulaItem,
+  selectStoredConstant,
   startGame,
   startWave,
   tick,
@@ -35,6 +39,7 @@ import {
   FORMULA_QUEUE_CAPACITY,
   OPERATOR_QUEUE_CAPACITY,
   OPERATORS,
+  STORED_CONSTANT_CAPACITY,
 } from '../src/game/content.js';
 
 const term = (coefficient, xPower = 0, yPower = 0) => ({ coefficient, xPower, yPower });
@@ -104,6 +109,38 @@ test('preparation auto-starts without bonus and pause freezes its clock', () => 
   assert.equal(state.energy, before);
 });
 
+test('new chapter weapons pause preparation until their tutorials are read', () => {
+  assert.deepEqual(chapterWeaponTutorials(0), []);
+  assert.deepEqual(chapterWeaponTutorials(1), ['secondDerivative', 'integral']);
+  assert.deepEqual(chapterWeaponTutorials(2), ['definiteIntegralTower']);
+  assert.deepEqual(chapterWeaponTutorials(3), ['partial', 'evaluateTower']);
+  assert.deepEqual(chapterWeaponTutorials(4), ['limit', 'eulerTower']);
+  assert.deepEqual(chapterWeaponTutorials(5), ['reflect', 'resonanceTower']);
+  assert.deepEqual(chapterWeaponTutorials(CHAPTERS.length), []);
+
+  const state = createGame(111);
+  state.phase = 'running';
+  state.currentWave = { ...state.currentWave, entries: [] };
+  state.nextSpawnIndex = 0;
+  tick(state, 0.01);
+  assert.equal(state.chapterIndex, 1);
+  assert.deepEqual(state.weaponTutorialQueue, ['secondDerivative', 'integral']);
+
+  const prepBefore = state.prepRemaining;
+  const formulaCooldownBefore = state.formulaCooldown;
+  tick(state, 1);
+  assert.equal(state.prepRemaining, prepBefore);
+  assert.equal(state.formulaCooldown, formulaCooldownBefore);
+  assert.equal(startWave(state), false);
+
+  assert.equal(advanceWeaponTutorial(state), true);
+  assert.deepEqual(state.weaponTutorialQueue, ['integral']);
+  assert.equal(advanceWeaponTutorial(state), true);
+  assert.deepEqual(state.weaponTutorialQueue, []);
+  tick(state, 0.2);
+  assert.ok(state.prepRemaining < prepBefore);
+});
+
 test('placing a tower consumes one matching card and its energy cost', () => {
   const state = createGame(12);
   startGame(state);
@@ -157,12 +194,63 @@ test('non-leading formula and constant cards assemble and install', () => {
   assert.equal(selectConstantItem(state, constant.id), true);
   assert.equal(currentAssembly(state).value, 4);
   assert.equal(prepareAssembly(state), true);
+  assert.equal(state.storedConstants.length, 1);
+  assert.equal(state.storedConstants[0].value, 4);
   assert.equal(selectArsenalItem(state, subtractCard.id), true);
   assert.equal(placeTower(state, 0, 0), true);
   assert.equal(installAssembly(state, state.towers[0].id), true);
   assert.equal(state.towers[0].parameter, 4);
+  assert.equal(state.storedConstants.length, 0);
   assert.equal(state.formulaQueue.some((item) => item.id === formula.id), false);
   assert.equal(state.constantQueue.some((item) => item.id === constant.id), false);
+});
+
+test('assembled constants store up to five without consuming materials on overflow', () => {
+  const state = createGame(141);
+  state.formulaQueue = Array.from({ length: 6 }, (_, index) => ({
+    id: `formula-cap-${index}`,
+    cardId: 'identityK',
+  }));
+  state.constantQueue = Array.from({ length: 6 }, (_, index) => ({
+    id: `constant-cap-${index}`,
+    value: index + 1,
+  }));
+  state.selectedFormulaId = state.formulaQueue[0].id;
+  state.selectedConstantId = state.constantQueue[0].id;
+
+  for (let index = 0; index < STORED_CONSTANT_CAPACITY; index += 1) {
+    assert.equal(prepareAssembly(state), true);
+  }
+  assert.deepEqual(state.storedConstants.map((item) => item.value), [1, 2, 3, 4, 5]);
+  const formulasBefore = state.formulaQueue.length;
+  const constantsBefore = state.constantQueue.length;
+  assert.equal(prepareAssembly(state), false);
+  assert.equal(state.formulaQueue.length, formulasBefore);
+  assert.equal(state.constantQueue.length, constantsBefore);
+});
+
+test('any stored constant can be selected, discarded, or consumed by a tower', () => {
+  const state = createGame(142);
+  state.storedConstants = [
+    { id: 'stored-a', value: 2, source: 'k｜k=2' },
+    { id: 'stored-b', value: 7, source: 'k｜k=7' },
+    { id: 'stored-c', value: 11, source: 'k｜k=11' },
+  ];
+  state.selectedStoredConstantId = 'stored-a';
+  const ordinaryTower = configuredTower('derivative');
+  const configurableTower = configuredTower('subtract', null);
+  state.towers.push(ordinaryTower, configurableTower);
+
+  assert.equal(selectStoredConstant(state, 'stored-b'), true);
+  assert.equal(installAssembly(state, ordinaryTower.id), false);
+  assert.equal(state.storedConstants.length, 3);
+  assert.equal(installAssembly(state, configurableTower.id), true);
+  assert.equal(configurableTower.parameter, 7);
+  assert.deepEqual(state.storedConstants.map((item) => item.value), [2, 11]);
+  assert.equal(discardStoredConstant(state, 'stored-c'), true);
+  assert.deepEqual(state.storedConstants.map((item) => item.value), [2]);
+  assert.equal(selectStoredConstant(state, 'stored-a'), true);
+  assert.equal(state.selectedStoredConstantId, null);
 });
 
 test('all three queues refill during preparation and respect capacity', () => {
@@ -200,6 +288,8 @@ test('chapter completion repairs HP and resets map, economy, towers, and queues'
   state.nextSpawnIndex = 0;
   state.baseHp = 350;
   state.energy = 1;
+  state.storedConstants = [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }];
+  state.selectedStoredConstantId = 'persistent-constant';
   state.towers.push(configuredTower('derivative'));
   tick(state, 0.01);
   assert.equal(state.chapterIndex, 1);
@@ -209,6 +299,8 @@ test('chapter completion repairs HP and resets map, economy, towers, and queues'
   assert.deepEqual(state.board, CHAPTERS[1].board);
   assert.equal(state.towers.length, 0);
   assert.deepEqual(state.operatorQueue.map((item) => item.operatorId), CHAPTERS[1].starterOperators);
+  assert.deepEqual(state.storedConstants, [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }]);
+  assert.equal(state.selectedStoredConstantId, 'persistent-constant');
 });
 
 test('entering endless resets once, then later rounds preserve the defense', () => {
@@ -219,12 +311,16 @@ test('entering endless resets once, then later rounds preserve the defense', () 
   state.currentWave = { ...state.currentWave, entries: [] };
   state.nextSpawnIndex = 0;
   state.baseHp = 300;
+  state.storedConstants = [{ id: 'endless-constant', value: Math.PI, source: 'k｜k=π' }];
+  state.selectedStoredConstantId = 'endless-constant';
   tick(state, 0.01);
   assert.equal(state.chapterIndex, CHAPTERS.length);
   assert.equal(state.endlessRound, 1);
   assert.equal(state.energy, ENDLESS_CHAPTER.startingEnergy);
   assert.equal(state.baseHp, 400);
   assert.deepEqual(state.board, ENDLESS_CHAPTER.board);
+  assert.equal(state.storedConstants[0].value, Math.PI);
+  assert.equal(state.selectedStoredConstantId, 'endless-constant');
 
   const persistentTower = configuredTower('derivative');
   state.towers.push(persistentTower);

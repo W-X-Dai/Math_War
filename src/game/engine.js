@@ -30,7 +30,9 @@ import {
   INTEGRATION_CONSTANTS,
   OPERATOR_QUEUE_CAPACITY,
   OPERATOR_QUEUE_INTERVAL,
+  OPERATOR_ORDER,
   OPERATORS,
+  STORED_CONSTANT_CAPACITY,
 } from './content.js';
 import { generateEndlessWave, generateFiniteWave } from './level-generator.js';
 
@@ -464,6 +466,11 @@ function chapterConfig(index) {
   return index < CHAPTERS.length ? CHAPTERS[index] : ENDLESS_CHAPTER;
 }
 
+export function chapterWeaponTutorials(chapterIndex) {
+  if (chapterIndex <= 0 || chapterIndex >= CHAPTERS.length) return [];
+  return OPERATOR_ORDER.filter((operatorId) => OPERATORS[operatorId]?.unlockChapter === chapterIndex);
+}
+
 function resetForChapter(state, chapterIndex) {
   const config = chapterConfig(chapterIndex);
   state.chapterIndex = chapterIndex;
@@ -486,10 +493,12 @@ function resetForChapter(state, chapterIndex) {
   state.selectedFormulaId = state.formulaQueue[0]?.id ?? null;
   state.selectedConstantId = state.constantQueue[0]?.id ?? null;
   state.selectedEnemyId = null;
-  state.assemblyValue = null;
-  state.assemblySource = null;
+  if (!state.storedConstants.some((item) => item.id === state.selectedStoredConstantId)) {
+    state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
+  }
   state.partialConfirmOpen = false;
   state.partialUsed = false;
+  state.weaponTutorialQueue = chapterWeaponTutorials(chapterIndex);
   state.energyClock = 0;
   state.chain = 0;
   state.waveClock = 0;
@@ -533,8 +542,8 @@ export function createGame(seed = 20260905) {
     selectedFormulaId: null,
     selectedConstantId: null,
     selectedOperatorItemId: null,
-    assemblyValue: null,
-    assemblySource: null,
+    storedConstants: [],
+    selectedStoredConstantId: null,
     towers: [],
     enemies: [],
     effects: [],
@@ -545,6 +554,7 @@ export function createGame(seed = 20260905) {
     partialConfirmOpen: false,
     partialUsed: false,
     tutorialVisible: true,
+    weaponTutorialQueue: [],
     bannerTimer: 0,
     toast: '',
     toastTone: 'neutral',
@@ -592,6 +602,10 @@ function beginWave(state, awardEarly) {
 }
 
 export function startWave(state) {
+  if (state.weaponTutorialQueue.length > 0) {
+    notify(state, '先看完本章新軍械教學。', 'danger');
+    return false;
+  }
   return beginWave(state, true);
 }
 
@@ -601,6 +615,7 @@ export function tick(state, rawDt) {
   if (state.paused) return;
 
   if (state.phase === 'preparing') {
+    if (state.weaponTutorialQueue.length > 0) return;
     updateQueues(state, dt);
     state.prepRemaining = Math.max(0, state.prepRemaining - dt);
     if (state.prepRemaining <= 0) beginWave(state, false);
@@ -886,6 +901,15 @@ export function togglePause(state) {
   return true;
 }
 
+export function advanceWeaponTutorial(state) {
+  if (state.phase !== 'preparing' || state.weaponTutorialQueue.length === 0) return false;
+  state.weaponTutorialQueue.shift();
+  if (state.weaponTutorialQueue.length === 0) {
+    addLog(state, '新軍械教學完成；整備倒數開始。', 'success');
+  }
+  return true;
+}
+
 export function toggleSpeed(state) {
   state.speed = state.speed === 1 ? 2 : 1;
 }
@@ -961,6 +985,21 @@ export function discardConstantItem(state, itemId) {
   return true;
 }
 
+export function discardStoredConstant(state, itemId) {
+  const item = state.storedConstants.find((candidate) => candidate.id === itemId);
+  if (!item) {
+    notify(state, '已組裝常數庫是空的。', 'danger');
+    return false;
+  }
+  state.storedConstants = state.storedConstants.filter((candidate) => candidate.id !== itemId);
+  if (state.selectedStoredConstantId === itemId) {
+    state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
+  }
+  addLog(state, `捨棄已組裝常數 ${item.value}`, 'danger');
+  notify(state, `已捨棄常數 ${item.value}`, 'neutral');
+  return true;
+}
+
 export function discardArsenalItem(state, itemId) {
   const item = state.operatorQueue.find((candidate) => candidate.id === itemId);
   if (!item) {
@@ -976,8 +1015,8 @@ export function discardArsenalItem(state, itemId) {
 }
 
 export function prepareAssembly(state) {
-  if (state.assemblyValue !== null) {
-    notify(state, '先把手上的常數裝入一座空槽塔。', 'danger');
+  if (state.storedConstants.length >= STORED_CONSTANT_CAPACITY) {
+    notify(state, `常數庫已滿（${STORED_CONSTANT_CAPACITY}/${STORED_CONSTANT_CAPACITY}）。`, 'danger');
     return false;
   }
   const assembly = currentAssembly(state);
@@ -989,19 +1028,25 @@ export function prepareAssembly(state) {
   state.constantQueue = state.constantQueue.filter((item) => item.id !== assembly.constant.id);
   state.selectedFormulaId = state.formulaQueue[0]?.id ?? null;
   state.selectedConstantId = state.constantQueue[0]?.id ?? null;
-  state.assemblyValue = assembly.value;
-  state.assemblySource = `${assembly.formula.label}｜k=${assembly.constant.value}`;
+  const stored = {
+    id: nextId(state, 'stored-constant'),
+    value: assembly.value,
+    source: `${assembly.formula.label}｜k=${assembly.constant.value}`,
+  };
+  state.storedConstants.push(stored);
+  state.selectedStoredConstantId = stored.id;
   state.selectedOperator = null;
   state.selectedOperatorItemId = null;
   state.targetingOperator = null;
   state.partialConfirmOpen = false;
   addLog(state, `${assembly.formula.label}，k=${assembly.constant.value} → ${assembly.value}`, 'success');
-  notify(state, `常數 ${assembly.value} 已組好；點擊有空槽的塔。`, 'success');
+  notify(state, `常數 ${assembly.value} 已存入常數庫。`, 'success');
   return true;
 }
 
 export function installAssembly(state, towerId) {
-  if (state.assemblyValue === null) return false;
+  const stored = state.storedConstants.find((item) => item.id === state.selectedStoredConstantId);
+  if (!stored) return false;
   const tower = state.towers.find((candidate) => candidate.id === towerId);
   const configurable = ['subtract', 'definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'];
   if (!tower || !configurable.includes(tower.typeId)) {
@@ -1009,7 +1054,7 @@ export function installAssembly(state, towerId) {
     return false;
   }
 
-  const value = state.assemblyValue;
+  const value = stored.value;
   if (tower.typeId === 'subtract') {
     tower.parameter = value;
     addLog(state, `參數平移砲完成：P(x) − ${value}`, 'success');
@@ -1034,10 +1079,16 @@ export function installAssembly(state, towerId) {
     addLog(state, `定積分塔重新組裝：下界 ${value}，等待上界`, 'success');
   }
 
-  state.assemblyValue = null;
-  state.assemblySource = null;
+  state.storedConstants = state.storedConstants.filter((item) => item.id !== stored.id);
+  state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
   tower.active = true;
   notify(state, tower.typeId === 'definiteIntegralTower' ? '積分界已裝入。' : '參數塔已啟動。', 'success');
+  return true;
+}
+
+export function selectStoredConstant(state, itemId) {
+  if (!state.storedConstants.some((item) => item.id === itemId)) return false;
+  state.selectedStoredConstantId = state.selectedStoredConstantId === itemId ? null : itemId;
   return true;
 }
 

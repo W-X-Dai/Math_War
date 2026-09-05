@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 
-import { damage, differentiate, formatExpression, isZero } from '../domain/expression.js';
+import { damage, differentiate, formatExpression } from '../domain/expression.js';
 import { ENEMY_TYPES, OPERATORS } from '../game/content.js';
 import { enemyThreat, selectedEnemy } from '../game/engine.js';
 import { formatValue, prettyFormula } from '../ui/format.js';
@@ -26,23 +26,85 @@ const cells = computed(() => Array.from({ length: board.value.rows * board.value
 })));
 
 const trackedEnemy = computed(() => selectedEnemy(props.state));
+const selectedStoredConstant = computed(() => (
+  props.state.storedConstants?.find((item) => item.id === props.state.selectedStoredConstantId) ?? null
+));
 const nextDerivative = computed(() => (
   trackedEnemy.value ? differentiate(trackedEnemy.value.expression, 'x', 1) : null
 ));
 
 const formulaText = (expression) => prettyFormula(formatExpression(expression));
 
-function derivativeDepth(expression) {
-  if (
-    (expression.exponentials?.length ?? 0) > 0
-    || (expression.trigTerms?.length ?? 0) > 0
-    || (expression.logTerms?.length ?? 0) > 0
-    || (expression.terms ?? []).some((term) => term.xPower < 0)
-  ) return '∞';
-  if (isZero(expression)) return '0';
-  const highestPower = (expression.terms ?? []).reduce((maximum, term) => Math.max(maximum, term.xPower), 0);
-  return String(highestPower + 1);
-}
+// Keep the enemy's actual position untouched. Formula chips are laid out on a
+// separate horizontal track so a fast cluster cannot cover the equations.
+const enemyPresentation = computed(() => {
+  const byRow = new Map();
+  for (const enemyItem of props.state.enemies ?? []) {
+    const row = Number(enemyItem.row) || 0;
+    if (!byRow.has(row)) byRow.set(row, []);
+    byRow.get(row).push(enemyItem);
+  }
+
+  const layouts = new Map();
+  for (const [row, enemies] of byRow) {
+    const ordered = [...enemies].sort((a, b) => (
+      (Number(a.position) || 0) - (Number(b.position) || 0)
+      || String(a.id).localeCompare(String(b.id))
+    ));
+    let group = [];
+
+    const flushGroup = () => {
+      if (!group.length) return;
+      const safeLeft = 8;
+      const safeEnd = 75;
+      const cardGap = 0.75;
+      const chipWidth = Math.min(
+        10.5,
+        (safeEnd - safeLeft - (cardGap * (group.length - 1))) / group.length,
+      );
+      const safeRight = safeEnd - chipWidth;
+      const spacing = group.length > 1
+        ? chipWidth + cardGap
+        : 0;
+      const positions = group.map((enemyItem) => Number(enemyItem.position) || 0);
+      const averagePosition = positions.reduce((sum, position) => sum + position, 0) / group.length;
+      // These values mirror the battlefield path (16.5% + p × 78.5%) after
+      // accounting for the workbench rail and the chip's 82% anchor.
+      const naturalChipLeft = (position) => 17.25 + (position * 63.6);
+      const groupWidth = spacing * (group.length - 1);
+      const openTrack = safeRight - safeLeft - groupWidth;
+      const laneStep = Math.min(11.25, openTrack / 2);
+      const naturalStart = naturalChipLeft(averagePosition) - (groupWidth / 2);
+      let laneOffset = ((row % 3) - 1) * laneStep;
+      if (naturalStart < safeLeft + (laneStep * 2)) laneOffset = (row % 3) * laneStep;
+      if (naturalStart > safeRight - groupWidth - (laneStep * 2)) laneOffset = -(row % 3) * laneStep;
+      const desiredStart = Math.max(
+        safeLeft,
+        Math.min(safeRight - groupWidth, naturalStart + laneOffset),
+      );
+      group.forEach((enemyItem, index) => {
+        layouts.set(enemyItem.id, {
+          slot: index,
+          order: index,
+          row,
+          chipOffset: desiredStart + (index * spacing) - naturalChipLeft(positions[index]),
+          chipWidth: chipWidth < 10.5 ? chipWidth : null,
+        });
+      });
+      group = [];
+    };
+
+    ordered.forEach((enemyItem) => {
+      const previous = group[group.length - 1];
+      if (previous && Math.abs((Number(enemyItem.position) || 0) - (Number(previous.position) || 0)) > 0.14) {
+        flushGroup();
+      }
+      group.push(enemyItem);
+    });
+    flushGroup();
+  }
+  return layouts;
+});
 
 function occupied(row, column) {
   return props.state.towers.some((tower) => tower.row === row && tower.column === column);
@@ -70,8 +132,8 @@ function towerSlot(tower) {
 
 function towerLabel(tower) {
   const configurable = towerConfigurable(tower);
-  const interaction = props.state.assemblyValue !== null && configurable
-    ? `點擊裝入常數 ${props.state.assemblyValue}`
+  const interaction = selectedStoredConstant.value && configurable
+    ? `點擊裝入常數 ${selectedStoredConstant.value.value}`
     : tower.active ? '運作中，點擊停火' : '已停火，點擊恢復';
   return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，耐久 ${Math.max(0, Math.ceil(tower.hp))}，${interaction}`;
 }
@@ -82,6 +144,20 @@ function laneStyle(row, position) {
     '--row': row,
     '--lane-y': `${35 + ((row + 0.5) / board.value.rows) * 50}%`,
   };
+}
+
+function enemyStyle(enemyItem) {
+  const layout = enemyPresentation.value.get(enemyItem.id) ?? {
+    slot: 0, order: 0, chipOffset: 0, chipWidth: null,
+  };
+  const style = {
+    ...laneStyle(enemyItem.row, enemyItem.position),
+    '--stack-slot': layout.slot,
+    '--stack-x': `${layout.chipOffset}cqw`,
+    zIndex: 20 + layout.order,
+  };
+  if (layout.chipWidth !== null) style['--chip-width'] = `${layout.chipWidth}cqw`;
+  return style;
 }
 
 function enemyType(enemyItem) {
@@ -169,7 +245,7 @@ function effectStyle(effect) {
             'is-paused': !tower.active,
             'is-configurable': towerConfigurable(tower),
             'is-filled': towerConfigurable(tower) && towerFilled(tower),
-            'is-awaiting-assembly': towerConfigurable(tower) && state.assemblyValue !== null,
+            'is-awaiting-assembly': towerConfigurable(tower) && Boolean(selectedStoredConstant),
             'is-dragging': dragPayload?.kind === 'tower' && dragPayload.id === tower.id,
           }"
           type="button"
@@ -200,6 +276,7 @@ function effectStyle(effect) {
           class="enemy"
           data-action="enemy"
           :data-enemy-id="enemyItem.id"
+          :data-stack-slot="enemyPresentation.get(enemyItem.id)?.slot ?? 0"
           :class="{
             'is-selected': state.selectedEnemyId === enemyItem.id,
             'is-targetable': Boolean(state.targetingOperator),
@@ -207,12 +284,12 @@ function effectStyle(effect) {
             'is-hit': enemyItem.hitFlash > 0,
           }"
           type="button"
-          :style="laneStyle(enemyItem.row, enemyItem.position)"
+          :style="enemyStyle(enemyItem)"
           :aria-label="`${enemyType(enemyItem).name}，${familyLabel(enemyItem)}，${formulaText(enemyItem.expression)}，目前攻擊 ${enemyThreat(enemyItem)}，點擊查看公式`"
           @click="$emit('enemy', enemyItem.id)"
         >
           <span class="enemy-sprite" :class="enemyType(enemyItem).art" aria-hidden="true"></span>
-          <span class="enemy-chip">
+          <span class="enemy-chip" :title="formulaText(enemyItem.expression)">
             <span class="enemy-badges">
               <small class="family-badge">{{ familyLabel(enemyItem) }}</small>
               <small
@@ -224,7 +301,6 @@ function effectStyle(effect) {
             </span>
             <strong class="enemy-formula">{{ formulaText(enemyItem.expression) }}</strong>
             <span class="enemy-meta">
-              <span data-enemy-depth>D × {{ derivativeDepth(enemyItem.expression) }}</span>
               <span class="damage-value" data-enemy-damage>攻擊 {{ enemyThreat(enemyItem) }}</span>
             </span>
           </span>

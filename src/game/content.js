@@ -4,6 +4,7 @@ const board = (rows, columns, placeableColumns) => Object.freeze({ rows, columns
 
 export const OPERATOR_QUEUE_CAPACITY = 8;
 export const OPERATOR_QUEUE_INTERVAL = 8;
+export const STORED_CONSTANT_CAPACITY = 5;
 export const CONSTANT_QUEUE_CAPACITY = 10;
 export const CONSTANT_QUEUE_INTERVAL = 7.5;
 export const FORMULA_QUEUE_CAPACITY = 10;
