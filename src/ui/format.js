@@ -35,7 +35,12 @@ export function prettyFormula(value) {
 
 export function formatValue(value) {
   if (Number.isInteger(value)) return String(value);
+  const piRatio = value / Math.PI;
+  const commonPi = [
+    [-2, '−2π'], [-1, '−π'], [-0.5, '−π/2'],
+    [0.5, 'π/2'], [1, 'π'], [2, '2π'],
+  ].find(([ratio]) => Math.abs(piRatio - ratio) < 1e-10);
+  if (commonPi) return commonPi[1];
   const rounded = Math.round(value * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, '');
 }
-

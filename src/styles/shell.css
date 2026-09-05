@@ -68,7 +68,7 @@
   min-width: 0;
   align-items: center;
   justify-content: center;
-  gap: clamp(10px, 1.25cqw, 22px);
+  gap: clamp(7px, 0.9cqw, 15px);
 }
 
 .hud-stat {
@@ -145,6 +145,15 @@
   background: var(--ink-deep);
 }
 
+.wave-dots i:last-child {
+  display: grid;
+  width: 18px;
+  height: 14px;
+  place-items: center;
+  border-radius: 2px;
+  font: 800 0.62rem/1 var(--font-math);
+}
+
 .wave-dots i.is-done {
   background: var(--brass-dark);
 }
@@ -153,6 +162,16 @@
   border-color: var(--brass-bright);
   background: var(--brass);
   box-shadow: 0 0 8px rgba(229, 169, 77, 0.72);
+}
+
+.hud-seed {
+  max-width: 112px;
+  overflow: hidden;
+  color: var(--parchment-dim);
+  font: 700 0.62rem/1.2 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hud-actions {
@@ -264,6 +283,77 @@
   font-size: clamp(11px, 0.9cqw, 14px);
   line-height: 1.45;
   text-overflow: ellipsis;
+}
+
+.bottom-bar.is-preparing {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.prep-status {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(10px, 1.5cqw, 24px);
+}
+
+.prep-clock,
+.early-bonus {
+  display: grid;
+  min-width: 92px;
+  gap: 2px;
+}
+
+.prep-clock > span,
+.early-bonus > span {
+  color: var(--parchment-dim);
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+}
+
+.prep-clock > strong {
+  color: var(--brass-bright);
+  font: 800 clamp(23px, 2.1cqw, 34px) / 1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.prep-clock small {
+  margin-left: 2px;
+  font-size: 0.55em;
+}
+
+.wave-intel {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.wave-intel > span {
+  min-width: 0;
+  padding: 5px 8px;
+  overflow: hidden;
+  border: 1px solid rgba(229, 169, 77, 0.28);
+  color: var(--parchment-dim);
+  font-size: clamp(9px, 0.72cqw, 12px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wave-intel b,
+.wave-intel .danger-level,
+.early-bonus > strong {
+  color: var(--brass-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+.early-bonus {
+  text-align: right;
+}
+
+.early-bonus > strong {
+  font: 800 clamp(15px, 1.35cqw, 21px) / 1.2 var(--font-display);
 }
 
 .primary-button,

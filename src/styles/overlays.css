@@ -385,8 +385,22 @@
 .result-modal dl {
   display: grid;
   margin: 20px 0;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-block: 1px solid rgba(229, 169, 77, 0.35);
+}
+
+.result-seed {
+  margin: -7px 0 0;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-seed strong {
+  color: var(--brass-bright);
+}
+
+.result-actions {
+  justify-content: center;
 }
 
 .result-modal dl > div {
@@ -455,6 +469,7 @@
   text-shadow: 0 2px 0 #4c2c0d;
   transform: translate(-50%, -50%);
   animation: banner-reveal 650ms ease-out both;
+  pointer-events: none;
 }
 
 .wave-banner:not(.is-visible) {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  addExpressions,
   cloneExpression,
   damage,
   definiteIntegral,
@@ -10,12 +11,17 @@ import {
   evaluateAt,
   formatExpression,
   integrate,
+  isEulerCompatible,
   isZero,
   limitAtInfinity,
+  logarithm,
+  multiplyByX,
   normalizeExpression,
   polynomial,
   reflectInput,
+  scaleExpression,
   subtractConstant,
+  trigonometric,
 } from "../src/domain/expression.js";
 
 test("x^5 needs six derivatives and reaches coefficient damage 120", () => {
@@ -219,4 +225,195 @@ test("definite integral rejects a free variable when a constant is required", ()
     () => definiteIntegral(exponential(1), 0, 1, "y"),
     /exponential terms still depend on x/,
   );
+});
+
+test("negative x powers normalize, format, differentiate, and integrate", () => {
+  const reciprocal = polynomial([
+    { coefficient: 2, xPower: -2 },
+    { coefficient: 3, xPower: -1 },
+  ]);
+
+  assert.equal(formatExpression(reciprocal), "3x^-1 + 2x^-2");
+  assert.equal(formatExpression(differentiate(reciprocal)), "-3x^-2 - 4x^-3");
+  assert.equal(formatExpression(integrate(reciprocal)), "3ln|x| - 2x^-1");
+  assert.equal(evaluateAt(reciprocal, 2), 2);
+  assert.throws(() => evaluateAt(reciprocal, 0), /singular at x = 0/);
+});
+
+test("trigonometric terms support normalization, calculus, reflection, and format", () => {
+  const expression = addExpressions(
+    trigonometric("sin", -2, 3),
+    trigonometric("cos", 2, 4),
+  );
+
+  assert.equal(formatExpression(expression), "4cos(2x) - 3sin(2x)");
+  assert.equal(
+    formatExpression(differentiate(expression)),
+    "-6cos(2x) - 8sin(2x)",
+  );
+  assert.equal(
+    formatExpression(integrate(expression)),
+    "3/2cos(2x) + 2sin(2x)",
+  );
+  assert.equal(formatExpression(reflectInput(expression)), "4cos(2x) + 3sin(2x)");
+  assert.ok(Math.abs(evaluateAt(expression, Math.PI / 4) + 3) < 1e-12);
+  assert.deepEqual(limitAtInfinity(expression), { status: "oscillating" });
+});
+
+test("zero-rate trig and exponential terms collapse into polynomial constants", () => {
+  const expression = normalizeExpression({
+    exponentials: [{ coefficient: 2, rate: 0 }],
+    trigTerms: [
+      { kind: "cos", coefficient: 3, rate: 0 },
+      { kind: "sin", coefficient: 99, rate: 0 },
+    ],
+  });
+
+  assert.equal(formatExpression(expression), "5");
+  assert.equal(damage(expression), 5);
+});
+
+test("logarithmic terms support product-rule differentiation and integration", () => {
+  const expression = logarithm(6, 2);
+  const derivative = differentiate(expression);
+  const primitive = integrate(expression);
+
+  assert.equal(formatExpression(expression), "6x^2ln|x|");
+  assert.equal(formatExpression(derivative), "12xln|x| + 6x");
+  assert.equal(formatExpression(primitive), "2x^3ln|x| - 2/3x^3");
+  assert.equal(formatExpression(differentiate(primitive)), "6x^2ln|x|");
+  assert.equal(formatExpression(differentiate(logarithm(1))), "x^-1");
+  assert.equal(formatExpression(integrate(polynomial({ xPower: -1 }))), "ln|x|");
+});
+
+test("unsupported logarithmic antiderivatives fail explicitly", () => {
+  assert.throws(
+    () => integrate(logarithm(1, -1)),
+    /outside the supported basis/,
+  );
+  assert.throws(
+    () => integrate(polynomial({ coefficient: 1, xPower: -1, yPower: 1 })),
+    /outside the supported basis/,
+  );
+});
+
+test("logarithmic reflection follows x-power parity", () => {
+  const expression = addExpressions(logarithm(2, 1), logarithm(3, -2));
+  assert.equal(
+    formatExpression(reflectInput(expression)),
+    "-2xln|x| + 3x^-2ln|x|",
+  );
+});
+
+test("limits discard reciprocal and decaying-log terms", () => {
+  const expression = addExpressions(
+    polynomial([
+      { coefficient: 8, xPower: -2 },
+      { coefficient: 4, xPower: 0 },
+    ]),
+    logarithm(3, -1),
+    exponential(-1, 2),
+  );
+  const result = limitAtInfinity(expression);
+
+  assert.equal(result.status, "finite");
+  assert.equal(formatExpression(result.expression), "4");
+});
+
+test("limits classify growing logarithms by their dominant coefficient", () => {
+  assert.deepEqual(limitAtInfinity(logarithm(-2, 0)), {
+    status: "divergent",
+    direction: -1,
+  });
+  assert.deepEqual(
+    limitAtInfinity(addExpressions(polynomial({ xPower: 2 }), logarithm(2, 2))),
+    { status: "divergent", direction: 1 },
+  );
+});
+
+test("definite integration supports trig, reciprocal, and logarithmic terms", () => {
+  const sineArea = definiteIntegral(trigonometric("sin", 1), 0, Math.PI);
+  const reciprocalArea = definiteIntegral(
+    polynomial({ coefficient: 2, xPower: -1 }),
+    1,
+    Math.E,
+  );
+  const logarithmicArea = definiteIntegral(logarithm(1), 1, Math.E);
+
+  assert.ok(Math.abs(evaluateAt(sineArea, 0) - 2) < 1e-12);
+  assert.ok(Math.abs(evaluateAt(reciprocalArea, 0) - 2) < 1e-12);
+  assert.ok(Math.abs(evaluateAt(logarithmicArea, 0) - 1) < 1e-12);
+});
+
+test("definite integration rejects singular intervals crossing or touching zero", () => {
+  const reciprocal = polynomial({ coefficient: 1, xPower: -1 });
+  for (const bounds of [[-1, 1], [0, 1], [-1, 0], [1, -1]]) {
+    assert.throws(
+      () => definiteIntegral(reciprocal, ...bounds),
+      /crosses or touches the singularity at x = 0/,
+    );
+  }
+  assert.throws(
+    () => definiteIntegral(logarithm(1), -1, 1),
+    /crosses or touches the singularity at x = 0/,
+  );
+});
+
+test("composition helpers preserve all supported basis terms", () => {
+  const expression = addExpressions(
+    polynomial({ coefficient: 2, xPower: -1 }),
+    exponential(-1, 3),
+    trigonometric("cos", 2, 4),
+    logarithm(5, 1),
+  );
+  const scaled = scaleExpression(expression, -2);
+
+  assert.equal(
+    formatExpression(scaled),
+    "-6e^-x - 8cos(2x) - 10xln|x| - 4x^-1",
+  );
+  assert.equal(damage(expression), 14);
+  assert.equal(damage(scaled), 28);
+});
+
+test("multiplyByX and Euler compatibility enforce the closed symbolic basis", () => {
+  const compatible = addExpressions(
+    polynomial({ coefficient: 2, xPower: -1 }),
+    logarithm(3, 0),
+  );
+
+  assert.equal(isEulerCompatible(compatible), true);
+  assert.equal(formatExpression(multiplyByX(compatible)), "3xln|x| + 2");
+  assert.equal(isEulerCompatible(exponential(1)), false);
+  assert.equal(isEulerCompatible(trigonometric("sin")), false);
+  assert.throws(() => multiplyByX(exponential(1)), /not closed/);
+  assert.throws(() => multiplyByX(trigonometric("sin")), /not closed/);
+});
+
+test("floating-point equivalent basis terms merge deterministically", () => {
+  const expression = normalizeExpression({
+    trigTerms: [
+      { kind: "sin", rate: 0.1 + 0.2, coefficient: 1 },
+      { kind: "sin", rate: 0.3, coefficient: 2 },
+    ],
+    logTerms: [
+      { xPower: -1, coefficient: 0.1 + 0.2 },
+      { xPower: -1, coefficient: -0.3 },
+    ],
+  });
+
+  assert.deepEqual(expression.trigTerms, [
+    { kind: "sin", rate: 0.3, coefficient: 3 },
+  ]);
+  assert.deepEqual(expression.logTerms, []);
+});
+
+test("clone and zero detection include trig and logarithmic arrays", () => {
+  const original = addExpressions(trigonometric("sin", 2, 3), logarithm(4, -1));
+  const clone = cloneExpression(original);
+
+  clone.trigTerms[0].coefficient = 100;
+  clone.logTerms[0].coefficient = 200;
+  assert.equal(formatExpression(original), "3sin(2x) + 4x^-1ln|x|");
+  assert.equal(isZero(scaleExpression(original, 0)), true);
 });

@@ -1,234 +1,179 @@
 import { exponential, polynomial } from '../domain/expression.js';
 
-export const BOARD = Object.freeze({ rows: 5, columns: 8, placeableColumns: 5 });
+const board = (rows, columns, placeableColumns) => Object.freeze({ rows, columns, placeableColumns });
+
+export const OPERATOR_QUEUE_CAPACITY = 8;
+export const OPERATOR_QUEUE_INTERVAL = 8;
+export const CONSTANT_QUEUE_CAPACITY = 10;
+export const CONSTANT_QUEUE_INTERVAL = 7.5;
+export const FORMULA_QUEUE_CAPACITY = 10;
+export const FORMULA_QUEUE_INTERVAL = 6;
 
 export const OPERATOR_ORDER = [
-  'derivative',
-  'subtract',
-  'secondDerivative',
-  'definiteIntegralTower',
-  'integral',
-  'reflect',
-  'limit',
-  'partial',
+  'derivative', 'subtract', 'secondDerivative', 'definiteIntegralTower',
+  'integral', 'partial', 'evaluateTower', 'limit', 'eulerTower', 'reflect',
+  'resonanceTower',
 ];
 
 export const OPERATORS = Object.freeze({
   derivative: {
-    id: 'derivative',
-    key: '1',
-    symbol: 'D',
-    name: '微分砲',
-    cost: 100,
-    kind: 'tower',
-    cooldown: 1.75,
-    art: 'tower-art-derivative',
-    unlockWave: 0,
+    id: 'derivative', symbol: 'D', name: '微分砲', cost: 100, kind: 'tower',
+    cooldown: 1.75, art: 'tower-art-derivative', unlockChapter: 0, unlockWave: 0,
+    counterTags: ['polynomial', 'constant', 'higherOrder', 'multivariable', 'logarithmic'],
     description: '同一路每次命中做一次 d/dx，直到公式化為 0。',
   },
   subtract: {
-    id: 'subtract',
-    key: '2',
-    symbol: 'x−[ ]',
-    name: '參數平移砲',
-    cost: 80,
-    kind: 'tower',
-    cooldown: 2.2,
-    art: 'tower-art-subtract',
-    unlockWave: 0,
+    id: 'subtract', symbol: 'x−[ ]', name: '參數平移砲', cost: 80, kind: 'tower',
+    cooldown: 2.2, art: 'tower-art-subtract', unlockChapter: 0, unlockWave: 0,
+    counterTags: ['constant'],
     description: '空槽塔：把工坊組出的常數裝入後，持續施放 P(x)−k。',
   },
   secondDerivative: {
-    id: 'secondDerivative',
-    key: '3',
-    symbol: 'D²',
-    name: '高階砲',
-    cost: 180,
-    kind: 'tower',
-    cooldown: 3.7,
-    art: 'tower-art-second',
-    unlockWave: 1,
+    id: 'secondDerivative', symbol: 'D²', name: '高階砲', cost: 180, kind: 'tower',
+    cooldown: 3.7, art: 'tower-art-second', unlockChapter: 1, unlockWave: 1,
+    counterTags: ['higherOrder', 'trigonometric', 'exponential'],
     description: '一發連做兩次微分，能跳過危險的中間係數。',
   },
   definiteIntegralTower: {
-    id: 'definiteIntegralTower',
-    key: '4',
-    symbol: '∫[ ]→[ ]',
-    name: '定積分塔',
-    cost: 150,
-    kind: 'tower',
-    cooldown: 5.2,
-    art: 'tower-art-integral',
-    unlockWave: 2,
+    id: 'definiteIntegralTower', symbol: '∫[ ]→[ ]', name: '定積分塔', cost: 150, kind: 'tower',
+    cooldown: 5.2, art: 'tower-art-integral', unlockChapter: 2, unlockWave: 2,
+    counterTags: ['polynomial', 'trigonometric'],
     description: '雙空槽塔：裝入下界與上界後，把目標化成定積分常數。',
   },
   integral: {
-    id: 'integral',
-    key: '5',
-    symbol: '∫ + C',
-    name: '不定積分',
-    cost: 175,
-    kind: 'target',
-    art: 'combo-art-integral',
-    unlockWave: 1,
+    id: 'integral', symbol: '∫ + C', name: '不定積分', cost: 175, kind: 'target',
+    art: 'combo-art-integral', unlockChapter: 1, unlockWave: 1,
+    counterTags: ['higherOrder', 'rational'],
     description: '一次性：積分後隨機抽 C。降係數、升階數，走投無路時賭一把。',
   },
   reflect: {
-    id: 'reflect',
-    key: '6',
-    symbol: 'x ↦ −x',
-    name: '輸入反射',
-    cost: 75,
-    kind: 'target',
-    art: 'combo-art-reflect',
-    unlockWave: 3,
-    description: '一次性：令 F(x) → F(−x)，可把 eˣ 變成 e⁻ˣ。',
+    id: 'reflect', symbol: 'x ↦ −x', name: '輸入反射', cost: 75, kind: 'target',
+    art: 'combo-art-reflect', unlockChapter: 5, unlockWave: 5,
+    counterTags: ['exponential'],
+    description: '一次性：令 F(x) → F(−x)，可把成長指數變成衰減指數。',
   },
   limit: {
-    id: 'limit',
-    key: '7',
-    symbol: 'lim ∞',
-    name: '無窮極限',
-    cost: 225,
-    kind: 'target',
-    art: 'combo-art-limit',
-    unlockWave: 3,
-    description: '一次性：極限為 0 才消滅；若發散，敵人會暴走。',
+    id: 'limit', symbol: 'lim ∞', name: '無窮極限', cost: 225, kind: 'target',
+    art: 'combo-art-limit', unlockChapter: 4, unlockWave: 4,
+    counterTags: ['rational', 'logarithmic', 'exponential'],
+    description: '一次性：有限結果會取代原式；不存在或發散時敵人暴走。',
   },
   partial: {
-    id: 'partial',
-    key: '8',
-    symbol: '∂/∂x',
-    name: '全場偏微分',
-    cost: 400,
-    kind: 'global',
-    art: 'tower-art-partial',
-    unlockWave: 2,
-    description: '昂貴卷軸：全場對 x 偏微分一次；每波限用一次。',
+    id: 'partial', symbol: '∂/∂x', name: '全場偏微分', cost: 400, kind: 'global',
+    art: 'tower-art-partial', unlockChapter: 3, unlockWave: 3,
+    counterTags: ['multivariable'],
+    description: '昂貴卷軸：全場對 x 偏微分一次；每輪限用一次。',
+  },
+  evaluateTower: {
+    id: 'evaluateTower', symbol: 'f([ ])', name: '代入塔', cost: 130, kind: 'tower',
+    cooldown: 3.1, art: 'tower-art-subtract', unlockChapter: 3, unlockWave: 3,
+    counterTags: ['polynomial', 'constant', 'multivariable'],
+    description: '空槽塔：裝入 k 後把目標代入 x=k；代到根時可直接歸零。',
+  },
+  eulerTower: {
+    id: 'eulerTower', symbol: 'xD＋[ ]I', name: 'Euler 塔', cost: 210, kind: 'tower',
+    cooldown: 3.8, art: 'tower-art-second', unlockChapter: 4, unlockWave: 4,
+    counterTags: ['polynomial', 'rational', 'logarithmic'],
+    description: '空槽塔：施作 xD+kI；適合處理齊次、分式與對數函數。',
+  },
+  resonanceTower: {
+    id: 'resonanceTower', symbol: 'D²＋[ ]I', name: '共振塔', cost: 240, kind: 'tower',
+    cooldown: 4.2, art: 'tower-art-second', unlockChapter: 5, unlockWave: 5,
+    counterTags: ['trigonometric', 'exponential'],
+    description: '空槽塔：施作 D²+kI；裝入正確頻率平方即可共振消去。',
   },
 });
 
 const p = (terms) => polynomial(terms);
 const term = (coefficient, xPower = 0, yPower = 0) => ({ coefficient, xPower, yPower });
 
+// Stable named fixtures are retained for compatibility. Procedural entries carry
+// complete enemy data and do not look themselves up in this table at runtime.
 export const ENEMY_TYPES = Object.freeze({
-  linear: {
-    name: '一次墨兔',
-    art: 'enemy-art-polynomial',
-    speed: 0.020,
-    reward: 26,
-    create: () => p([term(1, 1)]),
-  },
-  square: {
-    name: '平方墨兔',
-    art: 'enemy-art-polynomial',
-    speed: 0.018,
-    reward: 32,
-    create: () => p([term(1, 2)]),
-  },
-  shiftedSquare: {
-    name: '常數背包獸',
-    art: 'enemy-art-polynomial',
-    speed: 0.015,
-    reward: 42,
-    create: () => p([term(1, 2), term(20)]),
-  },
-  shiftedCube: {
-    name: '三次背包獸',
-    art: 'enemy-art-polynomial',
-    speed: 0.014,
-    reward: 48,
-    create: () => p([term(1, 3), term(30)]),
-  },
-  factorial: {
-    name: '階乘巨獸',
-    art: 'enemy-art-brute',
-    speed: 0.0105,
-    reward: 72,
-    create: () => p([term(1, 5)]),
-  },
-  emergency: {
-    name: '高係數浪獸',
-    art: 'enemy-art-wave',
-    speed: 0.017,
-    reward: 60,
-    create: () => p([term(120, 1)]),
-  },
-  yOnly: {
-    name: '純 y 摺獸',
-    art: 'enemy-art-wave',
-    speed: 0.017,
-    reward: 52,
-    create: () => p([term(1, 0, 4), term(10)]),
-  },
-  mixed: {
-    name: '雙變數紙獸',
-    art: 'enemy-art-polynomial',
-    speed: 0.012,
-    reward: 70,
-    create: () => p([term(1, 2, 3), term(20)]),
-  },
-  exponential: {
-    name: '指數飛蛾',
-    art: 'enemy-art-exponential',
-    speed: 0.0135,
-    reward: 110,
-    create: () => exponential(1, 1),
-  },
+  linear: { name: '一次墨兔', art: 'enemy-art-polynomial', family: 'polynomial', speed: 0.020, reward: 26, create: () => p([term(1, 1)]) },
+  square: { name: '平方墨兔', art: 'enemy-art-polynomial', family: 'polynomial', speed: 0.018, reward: 32, create: () => p([term(1, 2)]) },
+  shiftedSquare: { name: '常數背包獸', art: 'enemy-art-polynomial', family: 'constant', speed: 0.015, reward: 42, create: () => p([term(1, 2), term(20)]) },
+  shiftedCube: { name: '三次背包獸', art: 'enemy-art-polynomial', family: 'constant', speed: 0.014, reward: 48, create: () => p([term(1, 3), term(30)]) },
+  factorial: { name: '階乘巨獸', art: 'enemy-art-brute', family: 'higherOrder', speed: 0.0105, reward: 72, create: () => p([term(1, 5)]) },
+  emergency: { name: '高係數浪獸', art: 'enemy-art-wave', family: 'higherOrder', speed: 0.017, reward: 60, create: () => p([term(120, 1)]) },
+  yOnly: { name: '純 y 摺獸', art: 'enemy-art-wave', family: 'multivariable', speed: 0.017, reward: 52, create: () => p([term(1, 0, 4), term(10)]) },
+  mixed: { name: '雙變數紙獸', art: 'enemy-art-polynomial', family: 'multivariable', speed: 0.012, reward: 70, create: () => p([term(1, 2, 3), term(20)]) },
+  exponential: { name: '指數飛蛾', art: 'enemy-art-exponential', family: 'exponential', speed: 0.0135, reward: 110, create: () => exponential(1, 1) },
 });
 
-export const WAVES = Object.freeze([
-  {
-    name: '一次暖身',
-    hint: '先在有敵人的路放置 D 微分砲。常數還要再微分一次。',
-    entries: [
-      ['linear', 0, 0.0], ['square', 2, 1.8], ['linear', 4, 3.6],
-      ['square', 1, 5.4], ['linear', 3, 7.2],
-    ],
-  },
-  {
-    name: '常數陷阱',
-    hint: 'P−10 能削掉 +20，但打過頭就會把它推成負數、重新升高傷害。',
-    entries: [
-      ['shiftedSquare', 0, 0.0], ['square', 3, 1.6], ['shiftedCube', 1, 3.2],
-      ['shiftedSquare', 4, 4.8], ['square', 2, 6.4], ['shiftedCube', 3, 8.0],
-    ],
-  },
-  {
-    name: '階乘風暴',
-    hint: 'x⁵ 被微分後會升到 120 傷害。必要時用 ∫+C 降係數、換取時間。',
-    entries: [
-      ['factorial', 2, 0.0], ['emergency', 0, 2.8], ['shiftedSquare', 4, 4.6],
-      ['factorial', 1, 7.0], ['emergency', 3, 9.4],
-    ],
-  },
-  {
-    name: '偏微分試煉',
-    hint: '全場 ∂/∂x 會消去不含 x 的項，但也可能讓其他怪物係數暴增。',
-    entries: [
-      ['mixed', 0, 0.0], ['yOnly', 2, 1.4], ['factorial', 4, 3.0],
-      ['mixed', 3, 4.8], ['yOnly', 1, 6.2], ['mixed', 2, 8.1],
-    ],
-  },
-  {
-    name: '指數壓境',
-    hint: 'eˣ 微分後仍是 eˣ。先用 x↦−x，再用 lim∞ 完成必殺連鎖。',
-    entries: [
-      ['exponential', 1, 0.0], ['factorial', 3, 2.8], ['shiftedCube', 0, 4.4],
-      ['exponential', 4, 7.0], ['mixed', 2, 9.2], ['factorial', 1, 11.0],
-    ],
-  },
+const chapter = (config) => Object.freeze({
+  ...config,
+  board: board(config.board.rows, config.board.columns, config.board.placeableColumns),
+  starterOperators: Object.freeze([...config.starterOperators]),
+  starterFormulaIds: Object.freeze([...config.starterFormulaIds]),
+  starterConstants: Object.freeze([...config.starterConstants]),
+  families: Object.freeze([...config.families]),
+  countRange: Object.freeze([...config.countRange]),
+});
+
+export const CHAPTERS = Object.freeze([
+  chapter({
+    id: 'polynomial', name: '多項式原野', theme: '多項式', hint: '觀察次方，用 D 一階一階把多項式化為常數與 0。',
+    board: { rows: 4, columns: 7, placeableColumns: 4 }, startingEnergy: 540,
+    countRange: [6, 8], spawnInterval: 2.2, families: ['polynomial'],
+    starterOperators: ['derivative', 'derivative', 'derivative', 'derivative', 'derivative', 'subtract', 'subtract', 'subtract'],
+    starterFormulaIds: ['identityK', 'doubleK', 'negateK', 'kPlus10'], starterConstants: [0, 1, 2, 5],
+  }),
+  chapter({
+    id: 'constant', name: '常數陷阱', theme: '常數', hint: '背包裡的常數不會自己消失；精準平移，或多做一次微分。',
+    board: { rows: 4, columns: 8, placeableColumns: 5 }, startingEnergy: 620,
+    countRange: [8, 10], spawnInterval: 1.95, families: ['constant', 'polynomial'],
+    starterOperators: ['derivative', 'derivative', 'derivative', 'subtract', 'subtract', 'secondDerivative', 'secondDerivative', 'integral'],
+    starterFormulaIds: ['identityK', 'kPlus10', 'kMinus5', 'doubleK'], starterConstants: [-5, 0, 2, 5],
+  }),
+  chapter({
+    id: 'higher-order', name: '高階風暴', theme: '多項高階', hint: '高階式的中間係數很危險；D² 能跳過一次膨脹。',
+    board: { rows: 5, columns: 9, placeableColumns: 5 }, startingEnergy: 720,
+    countRange: [9, 12], spawnInterval: 1.75, families: ['higherOrder', 'constant', 'polynomial'],
+    starterOperators: ['derivative', 'derivative', 'secondDerivative', 'secondDerivative', 'secondDerivative', 'subtract', 'definiteIntegralTower', 'integral'],
+    starterFormulaIds: ['identityK', 'doubleK', 'kSquared', 'kMinus5'], starterConstants: [-2, 0, 2, 3],
+  }),
+  chapter({
+    id: 'multivariable', name: '偏微分迷宮', theme: '多變數', hint: '辨認 x 與 y 的角色；偏微分與代入能切開纏繞的變數。',
+    board: { rows: 5, columns: 10, placeableColumns: 6 }, startingEnergy: 820,
+    countRange: [10, 13], spawnInterval: 1.55, families: ['multivariable', 'higherOrder'],
+    starterOperators: ['derivative', 'derivative', 'secondDerivative', 'partial', 'evaluateTower', 'evaluateTower', 'definiteIntegralTower', 'integral'],
+    starterFormulaIds: ['identityK', 'doubleK', 'kSquared', 'negateK'], starterConstants: [-2, 0, 1, 2],
+  }),
+  chapter({
+    id: 'log-rational', name: '漸近裂谷', theme: '對數分式', hint: '負次方會在無窮遠衰減；對數則能先微分成分式。',
+    board: { rows: 6, columns: 11, placeableColumns: 7 }, startingEnergy: 920,
+    countRange: [11, 14], spawnInterval: 1.38, families: ['rational', 'logarithmic'],
+    starterOperators: ['derivative', 'derivative', 'limit', 'limit', 'eulerTower', 'eulerTower', 'evaluateTower', 'definiteIntegralTower'],
+    starterFormulaIds: ['identityK', 'negateK', 'kSquared', 'negSquareK'], starterConstants: [-2, 0, 1, 2],
+  }),
+  chapter({
+    id: 'trig-exponential', name: '共振天穹', theme: '三角指數', hint: '找出頻率平方，或把指數反射後送往無窮遠。',
+    board: { rows: 6, columns: 12, placeableColumns: 7 }, startingEnergy: 1050,
+    countRange: [12, 16], spawnInterval: 1.22, families: ['trigonometric', 'exponential'],
+    starterOperators: ['derivative', 'secondDerivative', 'resonanceTower', 'resonanceTower', 'evaluateTower', 'definiteIntegralTower', 'reflect', 'limit'],
+    starterFormulaIds: ['identityK', 'doubleK', 'kSquared', 'negSquareK'], starterConstants: [0, 1, 2, Math.PI],
+  }),
 ]);
 
-export const INTEGRATION_CONSTANTS = Object.freeze([-10, -5, 0, 5, 10]);
+export const ENDLESS_CHAPTER = chapter({
+  id: 'endless', name: '無限證明', theme: '無限', hint: '所有函數族都可能出現；讓現有防線適應每次新的命題。',
+  board: { rows: 7, columns: 12, placeableColumns: 7 }, startingEnergy: 1100,
+  countRange: [14, 36], spawnInterval: 1.12,
+  families: ['polynomial', 'constant', 'higherOrder', 'multivariable', 'rational', 'logarithmic', 'trigonometric', 'exponential'],
+  starterOperators: ['derivative', 'secondDerivative', 'definiteIntegralTower', 'limit', 'reflect', 'evaluateTower', 'eulerTower', 'resonanceTower'],
+  starterFormulaIds: ['identityK', 'doubleK', 'kSquared', 'negSquareK'], starterConstants: [0, 1, 2, Math.PI],
+});
 
-export const GOD_CONSTANT_VALUES = Object.freeze([-5, -3, -2, 0, 1, 2, 3, 5, 7, 10]);
-export const CONSTANT_QUEUE_CAPACITY = 10;
-export const CONSTANT_QUEUE_INTERVAL = 7.5;
-export const FORMULA_QUEUE_CAPACITY = 10;
-export const FORMULA_QUEUE_INTERVAL = 6;
+// Compatibility exports while the presentation layer migrates to dynamic boards.
+export const BOARD = CHAPTERS[0].board;
+export const WAVES = CHAPTERS;
+
+export const INTEGRATION_CONSTANTS = Object.freeze([-10, -5, 0, 5, 10]);
+export const GOD_CONSTANT_VALUES = Object.freeze([-10, -7, -5, -3, -2, -1, 0, 1, 2, 3, 5, 7, 10, -Math.PI, Math.PI]);
 
 export const FORMULA_CARDS = Object.freeze([
+  { id: 'identityK', label: 'k', evaluate: ({ k }) => k },
   { id: 'kPlus10', label: 'k + 10', evaluate: ({ k }) => k + 10 },
   { id: 'kMinus5', label: 'k − 5', evaluate: ({ k }) => k - 5 },
   { id: 'doubleK', label: '2k', evaluate: ({ k }) => 2 * k },
@@ -238,5 +183,6 @@ export const FORMULA_CARDS = Object.freeze([
   { id: 'kPlus5', label: 'k + 5', evaluate: ({ k }) => k + 5 },
   { id: 'tenMinusK', label: '10 − k', evaluate: ({ k }) => 10 - k },
   { id: 'kSquared', label: 'k²', evaluate: ({ k }) => k ** 2 },
+  { id: 'negSquareK', label: '−k²', evaluate: ({ k }) => -(k ** 2) },
   { id: 'doubleKPlus2', label: '2k + 2', evaluate: ({ k }) => 2 * k + 2 },
 ]);

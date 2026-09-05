@@ -373,6 +373,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
+  flex-wrap: wrap;
   border: 1px dashed rgba(232, 111, 90, 0.48);
   border-radius: 2px;
   background: rgba(40, 20, 19, 0.4);
@@ -381,6 +382,14 @@
   line-height: 1.35;
   text-align: center;
   transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.trash-dropzone span {
+  white-space: nowrap;
+}
+
+.trash-dropzone small {
+  flex-basis: 100%;
 }
 
 .trash-dropzone svg {
@@ -416,4 +425,3 @@
 .trash-dropzone.is-over small {
   color: #ffd2c9;
 }
-

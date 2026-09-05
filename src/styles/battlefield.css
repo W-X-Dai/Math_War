@@ -1,4 +1,4 @@
-/* Five-lane board, combat entities, effects, and sprite artwork. */
+/* Dynamic campaign board, combat entities, effects, and sprite artwork. */
 
 .battlefield {
   position: absolute;
@@ -48,7 +48,7 @@
   left: max(8px, 12.5%);
   display: grid;
   width: 34px;
-  grid-template-rows: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(var(--grid-rows), minmax(0, 1fr));
   pointer-events: none;
 }
 
@@ -176,7 +176,7 @@
 .enemy {
   position: absolute;
   z-index: 10;
-  top: calc(40% + (var(--row, 0) * 10%));
+  top: var(--lane-y, calc(40% + (var(--row, 0) * 10%)));
   left: var(--x, 50%);
   padding: 0;
   border: 0;
@@ -304,10 +304,13 @@
   filter: brightness(1.35) drop-shadow(0 0 12px rgba(255, 211, 124, 0.92));
 }
 
+.enemy-leave-active {
+  transition: opacity 320ms ease, transform 320ms ease;
+}
+
 .enemy.is-vanishing {
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.45);
-  transition: opacity 320ms ease, transform 320ms ease;
 }
 
 .enemy-sprite {
@@ -322,7 +325,7 @@
   left: 82%;
   display: grid;
   width: clamp(112px, 10.5cqw, 166px);
-  min-height: 56px;
+  min-height: 62px;
   padding: 7px 9px;
   gap: 3px;
   border: 1px solid var(--brass-dark);
@@ -330,6 +333,46 @@
   background: rgba(3, 20, 22, 0.92);
   box-shadow: 0 5px 16px rgba(0, 0, 0, 0.48);
   transform: translateY(-50%);
+}
+
+.enemy-badges {
+  display: flex;
+  min-width: 0;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.enemy-badges small {
+  max-width: 76px;
+  padding: 2px 4px;
+  overflow: hidden;
+  border: 1px solid rgba(127, 211, 179, 0.48);
+  border-radius: 2px;
+  color: var(--mint);
+  font: 700 clamp(7px, 0.55cqw, 9px) / 1.1 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enemy-badges .mutation-badge {
+  border-color: rgba(232, 111, 90, 0.56);
+  color: #ffab98;
+}
+
+.enemy-badges .mutation-badge.is-shield {
+  border-color: rgba(255, 211, 124, 0.64);
+  color: var(--brass-bright);
+}
+
+.enemy-badges .mutation-badge.is-fast {
+  border-color: rgba(127, 211, 179, 0.64);
+  color: var(--mint);
+}
+
+.enemy-badges .mutation-badge.is-spent {
+  border-color: rgba(205, 187, 145, 0.34);
+  color: rgba(205, 187, 145, 0.6);
+  text-decoration: line-through;
 }
 
 .enemy-formula {
@@ -361,7 +404,7 @@
 .projectile {
   position: absolute;
   z-index: 14;
-  top: calc(40% + (var(--row, 0) * 10%));
+  top: var(--lane-y, calc(40% + (var(--row, 0) * 10%)));
   left: var(--from, 20%);
   width: max(28px, calc(var(--x, 50%) - var(--from, 20%)));
   height: 3px;
@@ -379,7 +422,7 @@
 .combat-float {
   position: absolute;
   z-index: 35;
-  top: calc(40% + (var(--row, 0) * 10%));
+  top: var(--lane-y, calc(40% + (var(--row, 0) * 10%)));
   left: var(--x, 50%);
   color: var(--brass-bright);
   font: 800 clamp(17px, 1.8cqw, 30px) / 1 var(--font-display);
@@ -427,5 +470,3 @@
   28% { opacity: 1; }
   to { opacity: 0; transform: translateY(-34px) scale(1.04); }
 }
-
-
