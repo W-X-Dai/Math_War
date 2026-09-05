@@ -404,21 +404,200 @@
 }
 
 .projectile {
+  --projectile-color: var(--brass-bright);
+  --projectile-fill: rgba(40, 25, 8, 0.96);
   position: absolute;
   z-index: 14;
-  top: var(--lane-y, calc(40% + (var(--row, 0) * 10%)));
-  left: var(--from, 20%);
-  width: max(28px, calc(var(--x, 50%) - var(--from, 20%)));
-  height: 3px;
-  border-radius: 999px;
-  background: var(--brass-bright);
-  box-shadow: 0 0 4px #fff3c4, 0 0 13px var(--brass), 0 0 24px rgba(229, 169, 77, 0.72);
+  top: var(--projectile-y, var(--lane-y, 50%));
+  left: var(--projectile-x, var(--x, 50%));
+  width: 0;
+  height: 0;
   pointer-events: none;
+  will-change: top, left;
 }
 
-.projectile.subtract-projectile {
-  background: var(--coral);
-  box-shadow: 0 0 4px #ffd1c8, 0 0 13px var(--coral), 0 0 24px rgba(232, 111, 90, 0.66);
+.projectile__glyph {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  display: grid;
+  min-width: clamp(38px, 3.4cqw, 54px);
+  min-height: clamp(25px, 2.15cqw, 34px);
+  padding: 5px 9px;
+  place-items: center;
+  color: #fff9e8;
+  font: italic 800 clamp(11px, 0.92cqw, 15px) / 1 var(--font-math);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  opacity: var(--projectile-opacity, 1);
+  filter: drop-shadow(0 0 5px var(--projectile-color)) drop-shadow(0 4px 4px rgba(0, 0, 0, 0.64));
+  transform: translate(var(--projectile-anchor-x, -50%), -50%) scale(var(--projectile-scale, 1));
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+.projectile__glyph::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border: 1px solid var(--projectile-color);
+  background: var(--projectile-fill);
+  box-shadow: inset 0 0 8px color-mix(in srgb, var(--projectile-color) 28%, transparent);
+  content: "";
+}
+
+.projectile.is-impacted .projectile__glyph {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.projectile::after {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: clamp(24px, 2.4cqw, 38px);
+  aspect-ratio: 1;
+  border: 2px solid var(--projectile-color);
+  border-radius: 50%;
+  content: "";
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.3);
+}
+
+.projectile.is-impacted::after {
+  animation: projectile-impact var(--projectile-impact-duration, 280ms) ease-out both;
+}
+
+.battlefield.is-paused .projectile.is-impacted::after {
+  animation-play-state: paused;
+}
+
+.projectile--derivative .projectile__glyph::before {
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px rgba(255, 211, 124, 0.16), inset 0 0 9px rgba(255, 211, 124, 0.34);
+}
+
+.projectile--second-derivative {
+  --projectile-color: #a9d7ff;
+  --projectile-fill: rgba(11, 39, 57, 0.97);
+}
+
+.projectile--second-derivative .projectile__glyph::before {
+  border-width: 2px;
+  clip-path: polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%);
+  box-shadow: inset 0 0 0 2px rgba(169, 215, 255, 0.2), inset 0 0 10px rgba(169, 215, 255, 0.35);
+}
+
+.projectile--subtract {
+  --projectile-color: #ff9c87;
+  --projectile-fill: rgba(65, 19, 17, 0.97);
+}
+
+.projectile--subtract .projectile__glyph::before {
+  border-radius: 4px 999px 999px 4px;
+  clip-path: polygon(0 18%, 78% 18%, 100% 50%, 78% 82%, 0 82%, 8% 50%);
+}
+
+.projectile--definite-integral,
+.projectile--indefinite-integral {
+  --projectile-color: #8fe0bd;
+  --projectile-fill: rgba(7, 45, 39, 0.97);
+}
+
+.projectile--definite-integral .projectile__glyph,
+.projectile--indefinite-integral .projectile__glyph {
+  min-height: clamp(31px, 2.65cqw, 42px);
+  font-size: clamp(10px, 0.78cqw, 13px);
+}
+
+.projectile--definite-integral .projectile__glyph::before {
+  border-width: 2px 1px;
+  border-radius: 50% 9px 50% 9px;
+}
+
+.projectile--indefinite-integral .projectile__glyph::before {
+  border: 2px double var(--projectile-color);
+  border-radius: 50% 12px 50% 12px;
+}
+
+.projectile--evaluation {
+  --projectile-color: var(--parchment);
+  --projectile-fill: rgba(43, 36, 20, 0.97);
+}
+
+.projectile--evaluation .projectile__glyph::before {
+  border-width: 2px;
+  clip-path: polygon(13% 0, 87% 0, 100% 50%, 87% 100%, 13% 100%, 0 50%);
+}
+
+.projectile--euler {
+  --projectile-color: #91d7d3;
+  --projectile-fill: rgba(7, 39, 42, 0.97);
+}
+
+.projectile--euler .projectile__glyph,
+.projectile--resonance .projectile__glyph {
+  min-width: clamp(88px, 7.4cqw, 118px);
+  padding-inline: 12px 17px;
+  font-size: clamp(9px, 0.74cqw, 12px);
+}
+
+.projectile--euler .projectile__glyph::before {
+  border-width: 2px;
+  clip-path: polygon(0 8%, 79% 8%, 100% 50%, 79% 92%, 0 92%, 9% 50%);
+}
+
+.projectile--resonance {
+  --projectile-color: #d5bdff;
+  --projectile-fill: rgba(37, 24, 57, 0.97);
+}
+
+.projectile--resonance .projectile__glyph::before {
+  border: 3px double var(--projectile-color);
+  border-radius: 999px;
+}
+
+.projectile--reflection {
+  --projectile-color: #ffad91;
+  --projectile-fill: rgba(58, 25, 24, 0.97);
+}
+
+.projectile--reflection .projectile__glyph::before {
+  border-width: 2px;
+  clip-path: polygon(0 50%, 13% 0, 13% 18%, 87% 18%, 87% 0, 100% 50%, 87% 100%, 87% 82%, 13% 82%, 13% 100%);
+}
+
+.projectile--limit {
+  --projectile-color: #b9dcff;
+  --projectile-fill: rgba(15, 38, 59, 0.97);
+}
+
+.projectile--limit .projectile__glyph {
+  min-width: clamp(70px, 5.4cqw, 88px);
+  font-size: clamp(10px, 0.78cqw, 13px);
+}
+
+.projectile--limit .projectile__glyph::before {
+  clip-path: polygon(0 12%, 80% 12%, 100% 50%, 80% 88%, 0 88%, 8% 50%);
+}
+
+.projectile--partial {
+  --projectile-color: #8ee7d7;
+  --projectile-fill: rgba(7, 48, 47, 0.98);
+}
+
+.projectile--partial .projectile__glyph::before {
+  border-width: 2px;
+  clip-path: polygon(50% 0, 100% 28%, 88% 84%, 50% 100%, 12% 84%, 0 28%);
+}
+
+@keyframes projectile-impact {
+  0% { opacity: 0.92; transform: translate(-50%, -50%) scale(0.3); }
+  38% { opacity: 0.72; transform: translate(-50%, -50%) scale(0.95); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.75); }
 }
 
 .combat-float {

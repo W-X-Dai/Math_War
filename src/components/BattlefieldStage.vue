@@ -5,6 +5,7 @@ import { damage, differentiate, formatExpression } from '../domain/expression.js
 import { ENEMY_TYPES, OPERATORS } from '../game/content.js';
 import { enemyThreat, selectedEnemy } from '../game/engine.js';
 import { formatValue, prettyFormula } from '../ui/format.js';
+import { projectileLabel } from '../ui/projectile.js';
 import GameIcon from './GameIcon.vue';
 
 const props = defineProps({
@@ -15,10 +16,14 @@ const props = defineProps({
 defineEmits(['place-tower', 'enemy', 'tower', 'cancel', 'dismiss-tutorial', 'close-formula']);
 
 const board = computed(() => props.state.board ?? { rows: 5, columns: 8, placeableColumns: 5 });
-const boardStyle = computed(() => ({
-  '--grid-columns': board.value.columns,
-  '--grid-rows': board.value.rows,
-}));
+const boardStyle = computed(() => {
+  const gameSpeed = Math.max(0.1, Number(props.state.speed) || 1);
+  return {
+    '--grid-columns': board.value.columns,
+    '--grid-rows': board.value.rows,
+    '--projectile-impact-duration': `${280 / gameSpeed}ms`,
+  };
+});
 const cells = computed(() => Array.from({ length: board.value.rows * board.value.columns }, (_, index) => ({
   row: Math.floor(index / board.value.columns),
   column: index % board.value.columns,
@@ -186,28 +191,65 @@ function mutationBadges(enemyItem) {
   }));
 }
 
+function isProjectileEffect(effect) {
+  return effect.type?.includes('projectile');
+}
+
 function effectClass(effect) {
-  return effect.type.includes('projectile')
-    ? ['projectile', effect.type]
-    : ['combat-float', effect.type];
+  if (!isProjectileEffect(effect)) return ['combat-float', effect.type];
+  return [
+    'projectile',
+    `projectile--${effect.shape ?? (effect.type === 'subtract-projectile' ? 'subtract' : 'derivative')}`,
+    `is-${effect.trajectory ?? 'lane'}`,
+    { 'is-impacted': effect.status === 'impacted' },
+  ];
 }
 
 function effectStyle(effect) {
+  const rawPosition = Number(effect.position);
+  const position = effect.position !== null && effect.position !== undefined && Number.isFinite(rawPosition)
+    ? rawPosition
+    : 0.5;
+  const row = Number(effect.row);
+  const laneY = Number.isFinite(row) && row >= 0
+    ? 35 + ((row + 0.5) / board.value.rows) * 50
+    : 14;
   const style = {
     '--row': effect.row,
-    '--x': `${(effect.position ?? 0.5) * 100}%`,
-    '--lane-y': effect.row >= 0
-      ? `${35 + ((effect.row + 0.5) / board.value.rows) * 50}%`
-      : '14%',
+    '--x': `${position * 100}%`,
+    '--lane-y': `${laneY}%`,
   };
-  if (effect.from !== undefined) style['--from'] = `${effect.from * 100}%`;
+
+  if (isProjectileEffect(effect)) {
+    const rawProgress = Number(effect.progress);
+    const progress = effect.status === 'impacted'
+      ? 1
+      : Math.min(1, Math.max(0, Number.isFinite(rawProgress) ? rawProgress : 0));
+    const trajectory = effect.trajectory ?? 'lane';
+    const from = Number.isFinite(Number(effect.from)) ? Number(effect.from) : position;
+    const projectileX = trajectory === 'lane'
+      ? from + ((position - from) * progress)
+      : position;
+    const projectileY = trajectory === 'drop' ? laneY * progress : laneY;
+
+    style['--projectile-x'] = `${projectileX * 100}%`;
+    style['--projectile-y'] = `${projectileY}%`;
+    style['--projectile-opacity'] = Math.min(1, progress * 8);
+    style['--projectile-scale'] = 0.72 + (progress * 0.28);
+    style['--projectile-anchor-x'] = position >= 0.88 ? '-100%' : position <= 0.18 ? '0%' : '-50%';
+  }
   return style;
 }
 </script>
 
 <template>
   <section class="battle-stage" :aria-label="`${board.rows} 路函數戰場`">
-    <div class="battlefield" data-bind="battlefield" :style="boardStyle" :class="{ 'has-targeting': Boolean(state.targetingOperator) }">
+    <div
+      class="battlefield"
+      data-bind="battlefield"
+      :style="boardStyle"
+      :class="{ 'has-targeting': Boolean(state.targetingOperator), 'is-paused': state.paused }"
+    >
       <div class="lane-labels" aria-hidden="true">
         <span v-for="lane in board.rows" :key="lane">{{ lane }}</span>
       </div>
@@ -313,8 +355,15 @@ function effectStyle(effect) {
           :key="effect.id"
           :class="effectClass(effect)"
           :style="effectStyle(effect)"
+          :data-operator="effect.operatorId"
+          :data-status="effect.status"
           :data-equation="effect.equation ? prettyFormula(effect.equation) : undefined"
-        >{{ effect.label ?? '' }}</span>
+        >
+          <template v-if="isProjectileEffect(effect)">
+            <span class="projectile__glyph">{{ projectileLabel(effect) }}</span>
+          </template>
+          <template v-else>{{ effect.label ?? '' }}</template>
+        </span>
       </div>
 
       <div class="wave-banner" data-bind="waveBanner" :class="{ 'is-visible': state.bannerTimer > 0 }" aria-live="polite">

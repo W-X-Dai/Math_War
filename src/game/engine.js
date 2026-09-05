@@ -42,6 +42,11 @@ const BASE_POSITION = 0.125;
 const ATTACK_INTERVAL = 1.15;
 const ENERGY_INTERVAL = 5;
 const ENERGY_GAIN = 25;
+const PROJECTILE_TRAVEL_SECONDS = Object.freeze({
+  lane: 0.52,
+  drop: 0.56,
+});
+const PROJECTILE_IMPACT_LINGER = 0.3;
 const towerPosition = (column, board = BOARD) => (
   GRID_START + ((column + 0.5) / board.columns) * (GRID_END - GRID_START)
 );
@@ -102,7 +107,37 @@ function addLog(state, equation, tone = 'neutral') {
 }
 
 function addEffect(state, effect) {
-  state.effects.push({ id: nextId(state, 'fx'), ttl: 0.9, ...effect });
+  const createdEffect = { id: nextId(state, 'fx'), ttl: 0.9, ...effect };
+  state.effects.push(createdEffect);
+  return createdEffect;
+}
+
+function addOperatorProjectile(state, operatorId, target, source = null, details = {}) {
+  const projectile = OPERATORS[operatorId]?.projectile;
+  if (!projectile) throw new Error(`Missing projectile configuration for ${operatorId}`);
+  const delay = Math.max(0, Number(details.delay) || 0);
+  const travelTime = PROJECTILE_TRAVEL_SECONDS[projectile.trajectory];
+  const impactIn = delay + travelTime;
+  return addEffect(state, {
+    type: 'projectile',
+    operatorId,
+    shape: projectile.shape,
+    trajectory: projectile.trajectory,
+    targetId: target.id,
+    sourceTowerId: source?.id ?? null,
+    row: target.row,
+    position: target.position,
+    ...(source ? { from: source.position } : {}),
+    ...details,
+    delay,
+    travelTime,
+    impactIn,
+    progress: 0,
+    status: 'flying',
+    impactResolved: false,
+    missed: false,
+    ttl: impactIn + PROJECTILE_IMPACT_LINGER,
+  });
 }
 
 function operatorLabel(id) {
@@ -217,56 +252,150 @@ function transformEnemy(state, enemy, nextExpression, source, previousText) {
   return true;
 }
 
-function attackEnemy(state, tower, enemy) {
-  const previousText = formatExpression(enemy.expression);
-  let nextExpression;
+function evaluateOperatorOutcome(operatorId, targetExpression, details = {}) {
+  if (operatorId === 'derivative' || operatorId === 'partial') {
+    return { kind: 'transform', expression: differentiate(targetExpression, 'x', 1) };
+  }
+  if (operatorId === 'secondDerivative') {
+    return { kind: 'transform', expression: differentiate(targetExpression, 'x', 2) };
+  }
+  if (operatorId === 'subtract') {
+    return { kind: 'transform', expression: subtractConstant(targetExpression, details.parameter) };
+  }
+  if (operatorId === 'definiteIntegralTower') {
+    return {
+      kind: 'transform',
+      expression: definiteIntegral(targetExpression, details.lowerBound, details.upperBound, 'x'),
+    };
+  }
+  if (operatorId === 'evaluateTower') {
+    return { kind: 'transform', expression: polynomial(evaluateAt(targetExpression, details.parameter)) };
+  }
+  if (operatorId === 'resonanceTower') {
+    return {
+      kind: 'transform',
+      expression: addExpressions(
+        differentiate(targetExpression, 'x', 2),
+        scaleExpression(targetExpression, details.parameter),
+      ),
+    };
+  }
+  if (operatorId === 'eulerTower') {
+    return {
+      kind: 'transform',
+      expression: addExpressions(
+        multiplyByX(differentiate(targetExpression, 'x', 1)),
+        scaleExpression(targetExpression, details.parameter),
+      ),
+    };
+  }
+  if (operatorId === 'integral') {
+    return {
+      kind: 'transform',
+      expression: integrate(targetExpression, details.integrationConstant, 'x'),
+    };
+  }
+  if (operatorId === 'reflect') {
+    return { kind: 'transform', expression: reflectInput(targetExpression) };
+  }
+  if (operatorId === 'limit') {
+    return { kind: 'limit', result: limitAtInfinity(targetExpression) };
+  }
+  throw new Error(`Unsupported operator: ${operatorId}`);
+}
 
-  try {
-    if (tower.typeId === 'derivative') {
-      nextExpression = differentiate(enemy.expression, 'x', 1);
-    } else if (tower.typeId === 'secondDerivative') {
-      nextExpression = differentiate(enemy.expression, 'x', 2);
-    } else if (tower.typeId === 'subtract') {
-      nextExpression = subtractConstant(enemy.expression, tower.parameter);
-    } else if (tower.typeId === 'definiteIntegralTower') {
-      nextExpression = definiteIntegral(enemy.expression, tower.lowerBound, tower.upperBound, 'x');
-    } else if (tower.typeId === 'evaluateTower') {
-      nextExpression = polynomial(evaluateAt(enemy.expression, tower.parameter));
-    } else if (tower.typeId === 'resonanceTower') {
-      nextExpression = addExpressions(
-        differentiate(enemy.expression, 'x', 2),
-        scaleExpression(enemy.expression, tower.parameter),
-      );
-    } else if (tower.typeId === 'eulerTower') {
-      nextExpression = addExpressions(
-        multiplyByX(differentiate(enemy.expression, 'x', 1)),
-        scaleExpression(enemy.expression, tower.parameter),
-      );
-    } else {
-      return;
-    }
-  } catch (error) {
+function reportOperatorError(state, operatorId, previousText, error, sourceTowerId = null) {
+  const reason = error instanceof Error ? error.message : '定義域錯誤';
+  const tower = sourceTowerId
+    ? state.towers.find((candidate) => candidate.id === sourceTowerId)
+    : null;
+  if (tower) {
     tower.active = false;
-    const reason = error instanceof Error ? error.message : '定義域錯誤';
     notify(state, '運算遇到定義域或自由變數；這座塔已停火。', 'danger');
-    addLog(state, `${operatorLabel(tower.typeId)} ${previousText} 無法運算：${reason}`, 'danger');
+  } else {
+    notify(state, `命中時無法作用：${reason}`, 'danger');
+  }
+  addLog(state, `${operatorLabel(operatorId)} ${previousText} 無法運算：${reason}`, 'danger');
+}
+
+function resolveProjectileImpact(state, effect, enemy, frameDt) {
+  effect.status = 'impacted';
+  effect.impactResolved = true;
+  effect.progress = 1;
+  effect.impactIn = 0;
+  effect.ttl = PROJECTILE_IMPACT_LINGER + frameDt;
+  effect.row = enemy.row;
+  effect.position = enemy.position;
+
+  const previousText = formatExpression(enemy.expression);
+  let outcome;
+  try {
+    outcome = evaluateOperatorOutcome(effect.operatorId, enemy.expression, effect);
+  } catch (error) {
+    reportOperatorError(state, effect.operatorId, previousText, error, effect.sourceTowerId);
     return;
   }
 
-  transformEnemy(state, enemy, nextExpression, tower.typeId, previousText);
+  if (outcome.kind === 'transform') {
+    transformEnemy(state, enemy, outcome.expression, effect.operatorId, previousText);
+    if (effect.operatorId === 'integral') {
+      notify(
+        state,
+        `積分常數揭曉：C = ${effect.integrationConstant}`,
+        effect.integrationConstant === 0 ? 'success' : 'neutral',
+      );
+    }
+    return;
+  }
+
+  if (outcome.result.status === 'finite') {
+    transformEnemy(
+      state,
+      enemy,
+      cloneExpression(outcome.result.expression),
+      effect.operatorId,
+      previousText,
+    );
+    return;
+  }
+
+  if (enemy.shieldActive) {
+    transformEnemy(state, enemy, cloneExpression(enemy.expression), effect.operatorId, previousText);
+    return;
+  }
+
+  enemy.divergentTimer = 6;
+  enemy.hitFlash = 0.4;
   addEffect(state, {
-    type: tower.typeId === 'subtract' ? 'subtract-projectile' : 'projectile',
-    row: tower.row,
-    from: tower.position,
+    type: 'divergent',
+    row: enemy.row,
     position: enemy.position,
-    label: tower.typeId === 'subtract' ? `−${tower.parameter}`
-      : tower.typeId === 'secondDerivative' ? 'D²'
-        : tower.typeId === 'definiteIntegralTower' ? `∫${tower.lowerBound}→${tower.upperBound}`
-          : tower.typeId === 'evaluateTower' ? `f(${tower.parameter})`
-            : tower.typeId === 'eulerTower' ? `xD+${tower.parameter}I`
-              : tower.typeId === 'resonanceTower' ? `D²+${tower.parameter}I`
-                : 'D',
+    label: '發散！×2',
   });
+  const label = outcome.result.status === 'oscillating' ? '極限不存在' : '發散';
+  addLog(state, `lim∞ ${previousText} ${label}：敵人暴走 6 秒`, 'danger');
+  notify(state, `${label}！移速 ×1.5、傷害 ×2。`, 'danger');
+}
+
+function attackEnemy(state, tower, enemy) {
+  const previousText = formatExpression(enemy.expression);
+  const details = {
+    parameter: tower.parameter,
+    lowerBound: tower.lowerBound,
+    upperBound: tower.upperBound,
+  };
+
+  try {
+    // Preflight invalid operators without mutating the target. The live
+    // expression is evaluated again when the projectile actually arrives.
+    evaluateOperatorOutcome(tower.typeId, enemy.expression, details);
+  } catch (error) {
+    reportOperatorError(state, tower.typeId, previousText, error, tower.id);
+    return false;
+  }
+
+  addOperatorProjectile(state, tower.typeId, enemy, tower, details);
+  return true;
 }
 
 function nearestEnemyInLane(state, tower) {
@@ -296,9 +425,10 @@ function updateTowers(state, dt) {
       continue;
     }
 
-    attackEnemy(state, tower, target);
-    tower.cooldown += OPERATORS[tower.typeId].cooldown;
-    tower.fireFlash = 0.28;
+    if (attackEnemy(state, tower, target)) {
+      tower.cooldown += OPERATORS[tower.typeId].cooldown;
+      tower.fireFlash = 0.28;
+    }
   }
 }
 
@@ -307,6 +437,20 @@ function blockingTower(state, enemy) {
     .filter((tower) => tower.row === enemy.row && tower.position <= enemy.position + 0.014)
     .sort((a, b) => b.position - a.position)
     .find((tower) => enemy.position - tower.position < 0.065) ?? null;
+}
+
+function enemyMovementSpeed(enemy) {
+  const speedMultiplier = enemy.divergentTimer > 0 ? 1.5 : 1;
+  const affixMultiplier = enemy.affixes?.includes('fast') ? 1.35 : 1;
+  const baseSpeed = enemy.speed ?? ENEMY_TYPES[enemy.typeId]?.speed ?? 0.015;
+  return baseSpeed * speedMultiplier * affixMultiplier;
+}
+
+function timeUntilBase(state, enemy) {
+  if (blockingTower(state, enemy)) return Number.POSITIVE_INFINITY;
+  const movementSpeed = enemyMovementSpeed(enemy);
+  if (movementSpeed <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, (enemy.position - BASE_POSITION) / movementSpeed);
 }
 
 function strike(state, enemy, tower) {
@@ -335,9 +479,6 @@ function strike(state, enemy, tower) {
 function updateEnemies(state, dt) {
   for (const enemy of state.enemies) {
     if (enemy.dead) continue;
-    enemy.attackTimer = Math.max(0, enemy.attackTimer - dt);
-    enemy.divergentTimer = Math.max(0, enemy.divergentTimer - dt);
-    enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
 
     const atBase = enemy.position <= BASE_POSITION;
     if (atBase) {
@@ -357,10 +498,53 @@ function updateEnemies(state, dt) {
       continue;
     }
 
-    const speedMultiplier = enemy.divergentTimer > 0 ? 1.5 : 1;
-    const affixMultiplier = enemy.affixes?.includes('fast') ? 1.35 : 1;
-    const baseSpeed = enemy.speed ?? ENEMY_TYPES[enemy.typeId]?.speed ?? 0.015;
-    enemy.position = Math.max(BASE_POSITION, enemy.position - baseSpeed * speedMultiplier * affixMultiplier * dt);
+    enemy.position = Math.max(BASE_POSITION, enemy.position - enemyMovementSpeed(enemy) * dt);
+    if (enemy.position <= BASE_POSITION) {
+      strike(state, enemy, null);
+      enemy.dead = true;
+    }
+  }
+}
+
+function updateProjectileImpacts(state, dt) {
+  const flyingProjectiles = state.effects
+    .map((effect, index) => ({ effect, index }))
+    .filter(({ effect }) => effect.type === 'projectile' && !effect.impactResolved)
+    .sort((left, right) => (
+      left.effect.impactIn - right.effect.impactIn || left.index - right.index
+    ))
+    .map(({ effect }) => effect);
+
+  for (const effect of flyingProjectiles) {
+    const target = state.enemies.find((enemy) => (
+      enemy.id === effect.targetId
+      && !enemy.dead
+      && enemy.position > BASE_POSITION
+    ));
+    if (!target) {
+      effect.status = 'missed';
+      effect.impactResolved = true;
+      effect.missed = true;
+      effect.ttl = 0;
+      continue;
+    }
+
+    const baseIn = timeUntilBase(state, target);
+    if (baseIn <= dt + 1e-9 && baseIn + 1e-9 < effect.impactIn) {
+      effect.status = 'missed';
+      effect.impactResolved = true;
+      effect.missed = true;
+      effect.ttl = 0;
+      continue;
+    }
+
+    effect.row = target.row;
+    effect.position = target.position;
+    const reachesTarget = effect.impactIn <= dt + 1e-9;
+    effect.impactIn = reachesTarget ? 0 : effect.impactIn - dt;
+    const elapsed = effect.delay + effect.travelTime - effect.impactIn;
+    effect.progress = Math.max(0, Math.min(1, (elapsed - effect.delay) / effect.travelTime));
+    if (reachesTarget) resolveProjectileImpact(state, effect, target, dt);
   }
 }
 
@@ -368,6 +552,12 @@ function updateTransientState(state, dt) {
   for (const tower of state.towers) {
     tower.fireFlash = Math.max(0, tower.fireFlash - dt);
   }
+  for (const enemy of state.enemies) {
+    enemy.attackTimer = Math.max(0, enemy.attackTimer - dt);
+    enemy.divergentTimer = Math.max(0, enemy.divergentTimer - dt);
+    enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
+  }
+  if (state.phase === 'running') updateProjectileImpacts(state, dt);
   if (state.effects.length > 0) {
     for (const effect of state.effects) effect.ttl -= dt;
     const liveEffects = state.effects.filter((effect) => effect.ttl > 0);
@@ -410,8 +600,13 @@ function updateQueues(state, dt) {
   }
 }
 
+function clearProjectiles(state) {
+  state.effects = state.effects.filter((effect) => effect.type !== 'projectile');
+}
+
 function checkWaveState(state) {
   if (state.baseHp <= 0) {
+    clearProjectiles(state);
     state.phase = 'lost';
     state.selectedOperator = null;
     state.selectedOperatorItemId = null;
@@ -424,6 +619,12 @@ function checkWaveState(state) {
   const allSpawned = state.nextSpawnIndex >= wave.entries.length;
   const noneAlive = !state.enemies.some((enemy) => !enemy.dead);
   if (!allSpawned || !noneAlive) return;
+  // Preserve the contact frame long enough for the final impact pulse to render.
+  if (state.effects.some((effect) => (
+    effect.type === 'projectile' && effect.status === 'impacted'
+  ))) return;
+  state.enemies = state.enemies.filter((enemy) => !enemy.dead);
+  clearProjectiles(state);
 
   if (state.chapterIndex < CHAPTERS.length - 1) {
     const completedName = CHAPTERS[state.chapterIndex].name;
@@ -610,9 +811,9 @@ export function startWave(state) {
 }
 
 export function tick(state, rawDt) {
+  if (state.paused) return;
   const dt = Math.min(rawDt, 0.2) * state.speed;
   updateTransientState(state, dt);
-  if (state.paused) return;
 
   if (state.phase === 'preparing') {
     if (state.weaponTutorialQueue.length > 0) return;
@@ -622,6 +823,16 @@ export function tick(state, rawDt) {
     return;
   }
   if (state.phase !== 'running') return;
+
+  // A final hit can keep its visual pulse alive briefly. Do not advance
+  // resources, queues, or RNG during this visual-only interval.
+  if (
+    state.nextSpawnIndex >= state.currentWave.entries.length
+    && !state.enemies.some((enemy) => !enemy.dead)
+  ) {
+    checkWaveState(state);
+    return;
+  }
 
   state.waveClock += dt;
   state.energyClock += dt;
@@ -784,31 +995,25 @@ export function applyTargetOperator(state, enemyId) {
   const operatorId = state.targetingOperator;
   const operator = OPERATORS[operatorId];
   const operatorItem = state.operatorQueue.find((item) => item.id === state.selectedOperatorItemId);
-  const enemy = state.enemies.find((candidate) => candidate.id === enemyId && !candidate.dead);
+  const enemy = state.enemies.find((candidate) => (
+    candidate.id === enemyId
+    && !candidate.dead
+    && candidate.position > BASE_POSITION
+  ));
   if (!operator || operatorItem?.operatorId !== operatorId || !enemy || state.energy < operator.cost) return false;
 
   const before = formatExpression(enemy.expression);
-  let nextExpression = null;
-  let integrationConstant = null;
-  let limitResult = null;
+  const details = {};
+  const previousRngState = state.rngState;
 
   try {
     if (operatorId === 'integral') {
-      const previousRngState = state.rngState;
       const index = Math.floor(seededRandom(state) * INTEGRATION_CONSTANTS.length);
-      integrationConstant = INTEGRATION_CONSTANTS[index];
-      try {
-        nextExpression = integrate(enemy.expression, integrationConstant, 'x');
-      } catch (error) {
-        state.rngState = previousRngState;
-        throw error;
-      }
-    } else if (operatorId === 'reflect') {
-      nextExpression = reflectInput(enemy.expression);
-    } else if (operatorId === 'limit') {
-      limitResult = limitAtInfinity(enemy.expression);
+      details.integrationConstant = INTEGRATION_CONSTANTS[index];
     }
+    evaluateOperatorOutcome(operatorId, enemy.expression, details);
   } catch (error) {
+    state.rngState = previousRngState;
     const reason = error instanceof Error ? error.message : '定義域錯誤';
     notify(state, `這張牌無法作用：${reason}`, 'danger');
     addLog(state, `${operator.symbol} ${before} 無法運算：${reason}`, 'danger');
@@ -819,33 +1024,8 @@ export function applyTargetOperator(state, enemyId) {
   consumeOperatorItem(state);
   state.targetingOperator = null;
   state.selectedOperatorItemId = null;
-
-  if (operatorId === 'integral') {
-    transformEnemy(state, enemy, nextExpression, 'integral', before);
-    notify(
-      state,
-      `積分常數揭曉：C = ${integrationConstant}`,
-      integrationConstant === 0 ? 'success' : 'neutral',
-    );
-  } else if (operatorId === 'reflect') {
-    transformEnemy(state, enemy, nextExpression, 'reflect', before);
-  } else if (operatorId === 'limit') {
-    if (limitResult.status === 'finite') {
-      transformEnemy(state, enemy, cloneExpression(limitResult.expression), 'limit', before);
-    } else if (enemy.shieldActive) {
-      transformEnemy(state, enemy, cloneExpression(enemy.expression), 'limit', before);
-    } else {
-      enemy.divergentTimer = 6;
-      enemy.hitFlash = 0.4;
-      addEffect(state, { type: 'divergent', row: enemy.row, position: enemy.position, label: '發散！×2' });
-      const label = limitResult.status === 'oscillating' ? '極限不存在' : '發散';
-      addLog(state, `lim∞ ${before} ${label}：敵人暴走 6 秒`, 'danger');
-      notify(state, `${label}！移速 ×1.5、傷害 ×2。`, 'danger');
-    }
-  }
-
-  state.enemies = state.enemies.filter((candidate) => !candidate.dead);
-  checkWaveState(state);
+  addOperatorProjectile(state, operatorId, enemy, null, details);
+  notify(state, `${operator.symbol} 彈頭已發射；命中後結算。`, 'success');
   return true;
 }
 
@@ -859,27 +1039,30 @@ export function confirmPartial(state) {
     || operatorItem?.operatorId !== 'partial'
     || state.energy < operator.cost
   ) return false;
+  const targets = state.enemies.filter((enemy) => !enemy.dead && enemy.position > BASE_POSITION);
+  if (targets.length === 0) {
+    notify(state, '目前沒有可命中的敵人，偏微分尚未施放。', 'neutral');
+    return false;
+  }
   state.partialConfirmOpen = false;
   state.partialUsed = true;
   state.energy -= operator.cost;
   consumeOperatorItem(state);
   state.selectedOperatorItemId = null;
 
-  for (const enemy of [...state.enemies]) {
-    if (enemy.dead) continue;
-    const before = formatExpression(enemy.expression);
-    const after = differentiate(enemy.expression, 'x', 1);
-    transformEnemy(state, enemy, after, 'partial', before);
-  }
-  state.enemies = state.enemies.filter((enemy) => !enemy.dead);
-  addEffect(state, { type: 'global', row: 2, position: 0.55, label: '∂ / ∂x' });
-  notify(state, '全場偏微分已結算。', 'success');
-  checkWaveState(state);
+  targets.forEach((enemy, index) => {
+    addOperatorProjectile(state, 'partial', enemy, null, {
+      delay: Math.min(index * 0.035, 0.18),
+    });
+  });
+  notify(state, `全場偏微分已發射 ${targets.length} 枚彈頭。`, 'success');
   return true;
 }
 
 export function partialPreview(state) {
-  return state.enemies.map((enemy) => {
+  return state.enemies.filter((enemy) => (
+    !enemy.dead && enemy.position > BASE_POSITION
+  )).map((enemy) => {
     const after = enemy.shieldActive
       ? cloneExpression(enemy.expression)
       : differentiate(enemy.expression, 'x', 1);

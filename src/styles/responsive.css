@@ -289,6 +289,20 @@
     left: 12%;
   }
 
+  .projectile__glyph,
+  .projectile--definite-integral .projectile__glyph,
+  .projectile--indefinite-integral .projectile__glyph {
+    min-height: 24px;
+    padding: 4px 7px;
+    font-size: 10px;
+  }
+
+  .projectile--euler .projectile__glyph,
+  .projectile--resonance .projectile__glyph {
+    min-width: 82px;
+    padding-inline: 10px 15px;
+    font-size: 9px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -299,5 +313,20 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .projectile {
+    top: var(--lane-y, 50%);
+    left: var(--x, 50%);
+  }
+
+  .projectile__glyph {
+    opacity: 1;
+    transform: translate(var(--projectile-anchor-x, -50%), -50%) scale(1);
+  }
+
+  .projectile.is-impacted::after {
+    display: none;
+    animation: none !important;
   }
 }
