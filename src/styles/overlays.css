@@ -74,7 +74,7 @@
 
 .formula-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   align-items: center;
   min-height: 30px;
   padding: 4px 10px;
@@ -95,10 +95,12 @@
 
 .formula-row strong,
 .formula-row output {
+  overflow-wrap: anywhere;
   color: var(--brass-bright);
   font-family: var(--font-math);
   font-size: clamp(16px, 1.35cqw, 22px);
   font-variant-numeric: tabular-nums;
+  line-height: 1.15;
 }
 
 .derivation-log {

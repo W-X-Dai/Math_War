@@ -521,6 +521,41 @@ function hasXSingularity(expression) {
     expression.logTerms.length > 0;
 }
 
+/**
+ * Substitute a numeric x value while preserving every other free variable.
+ *
+ * This is intentionally different from evaluateAt(), whose numeric API also
+ * needs a concrete y value. A tower labelled f(k) substitutes x=k; it must not
+ * silently assume y=0 and erase terms such as y^2.
+ */
+export function substituteX(expression, x) {
+  assertFiniteNumber(x, "x value");
+  const normalized = normalizeExpression(expression);
+  if (x === 0 && hasXSingularity(normalized)) {
+    throw new RangeError("expression is singular at x = 0");
+  }
+
+  const terms = normalized.terms.map((term) => ({
+    coefficient: term.coefficient * x ** term.xPower,
+    xPower: 0,
+    yPower: term.yPower,
+  }));
+  const scalar = [
+    ...normalized.exponentials.map((term) => term.coefficient * Math.exp(term.rate * x)),
+    ...normalized.trigTerms.map((term) => term.coefficient * Math[term.kind](term.rate * x)),
+    ...normalized.logTerms.map(
+      (term) => term.coefficient * x ** term.xPower * Math.log(Math.abs(x)),
+    ),
+  ].reduce((total, value) => total + value, 0);
+  if (!Number.isFinite(scalar) || terms.some((term) => !Number.isFinite(term.coefficient))) {
+    throw new RangeError("expression substitution produced a non-finite result");
+  }
+  if (!isApproximatelyZero(scalar)) {
+    terms.push({ coefficient: scalar, xPower: 0, yPower: 0 });
+  }
+  return normalizeExpression({ terms });
+}
+
 /** Evaluate every supported term at a numeric point. */
 export function evaluateAt(expression, x, y = 0) {
   assertFiniteNumber(x, "x value");

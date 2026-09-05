@@ -79,7 +79,10 @@ test('projectile rendering has no ray or trail markup and styles', async () => {
   ]);
 
   assert.match(stageSource, /class="projectile__glyph"/);
+  assert.match(stageSource, /'is-missed': effect\.status === 'missed'/);
   assert.doesNotMatch(stageSource, /projectile__trail/);
+  assert.match(battlefieldCss, /\.projectile\.is-missed \.projectile__glyph/);
+  assert.match(battlefieldCss, /@keyframes projectile-miss/);
   assert.doesNotMatch(
     `${battlefieldCss}\n${responsiveCss}`,
     /projectile__trail|projectile-trail-(?:lane|drop)/,

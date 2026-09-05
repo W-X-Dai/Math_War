@@ -17,6 +17,93 @@
   to { opacity: 0; transform: translate(-50%, -56%) scale(1.02); }
 }
 
+.wave-intel.wave-intel--detailed {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.wave-intel-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wave-intel-meta::-webkit-scrollbar,
+.lane-intel-list::-webkit-scrollbar {
+  display: none;
+}
+
+.wave-intel-meta > span {
+  min-width: max-content;
+  padding: 3px 6px;
+  border: 1px solid rgba(229, 169, 77, 0.28);
+  color: var(--parchment-dim);
+  font-size: clamp(8px, 0.65cqw, 10px);
+  white-space: nowrap;
+}
+
+.wave-intel-meta .segment-badge {
+  border-color: rgba(229, 169, 77, 0.64);
+  color: var(--brass-bright);
+  font-weight: 800;
+}
+
+.tutorial-wave-intel .segment-badge {
+  flex: 0 0 auto;
+  border-color: rgba(229, 169, 77, 0.64);
+  color: var(--brass-bright);
+  font-weight: 800;
+}
+
+.wave-intel-meta .guaranteed-supply-badge {
+  border-color: rgba(127, 211, 179, 0.58);
+  background: rgba(38, 91, 79, 0.24);
+  color: var(--mint);
+}
+
+.lane-intel-list {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 2px;
+  gap: 5px;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-color: var(--brass-dark) transparent;
+  scrollbar-width: thin;
+}
+
+.lane-intel-list > li {
+  display: flex;
+  min-width: max-content;
+  padding: 4px 6px;
+  align-items: baseline;
+  gap: 5px;
+  border-left: 2px solid var(--teal-line);
+  background: rgba(7, 34, 36, 0.72);
+  color: var(--parchment-dim);
+  font-size: clamp(8px, 0.62cqw, 10px);
+  white-space: nowrap;
+}
+
+.lane-intel-list b {
+  color: var(--brass);
+}
+
+.lane-intel-list strong {
+  color: var(--parchment);
+}
+
+.lane-intel-list small {
+  color: var(--mint);
+  font-size: inherit;
+}
+
 @media (min-width: 901px) {
   body {
     display: grid;
@@ -171,31 +258,15 @@
   }
 
   .enemy {
-    --enemy-expression-max: clamp(104px, 18vw, 154px);
-  }
-
-  .enemy-expression-stack,
-  .enemy-body-expression,
-  .enemy-shield-expression {
-    min-height: 36px;
-  }
-
-  .enemy-body-expression,
-  .enemy-shield-expression {
-    padding: 4px 8px;
-  }
-
-  .enemy-shield-expression {
-    transform: translate(-2px, -2px);
-  }
-
-  .enemy.has-shield .enemy-body-expression {
-    transform: translate(2px, 2px);
-  }
-
-  .enemy-formula {
-    max-width: calc(var(--enemy-expression-max) - 16px);
-    font-size: clamp(16px, 2.5vw, 20px);
+    --enemy-expression-max: var(--enemy-card-max-width-compact);
+    --enemy-expression-min-height: var(--enemy-card-min-height-compact);
+    --enemy-expression-padding-block: var(--enemy-card-padding-block-compact);
+    --enemy-expression-padding-inline: var(--enemy-card-padding-inline-compact);
+    --enemy-formula-font-size: var(--enemy-card-font-size-compact);
+    --enemy-formula-long-font-size: var(--enemy-card-long-font-size-compact);
+    --enemy-formula-very-long-font-size: var(--enemy-card-very-long-font-size-compact);
+    --enemy-formula-extreme-font-size: var(--enemy-card-extreme-font-size-compact);
+    --enemy-shield-offset: var(--enemy-card-shield-offset-compact);
   }
 
   .operator-dock,
@@ -300,6 +371,15 @@
     background: var(--ink);
   }
 
+  .prep-status {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .wave-intel.wave-intel--detailed {
+    max-width: none;
+  }
+
   .toast-stack {
     top: 12px;
     right: 12px;
@@ -327,6 +407,18 @@
     grid-template-rows: auto auto;
   }
 
+  .prep-status {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .prep-status > .early-bonus {
+    display: none;
+  }
+
+  .lane-intel-list > li {
+    padding-block: 5px;
+  }
+
   .operator-dock,
   .game-shell > .operator-dock,
   .battle-layout > .operator-dock,
@@ -342,31 +434,15 @@
   }
 
   .enemy {
-    --enemy-expression-max: clamp(96px, 30vw, 132px);
-  }
-
-  .enemy-expression-stack,
-  .enemy-body-expression,
-  .enemy-shield-expression {
-    min-height: 34px;
-  }
-
-  .enemy-body-expression,
-  .enemy-shield-expression {
-    padding: 3px 7px;
-  }
-
-  .enemy-shield-expression {
-    transform: translate(-1px, -1px);
-  }
-
-  .enemy.has-shield .enemy-body-expression {
-    transform: translate(1px, 1px);
-  }
-
-  .enemy-formula {
-    max-width: calc(var(--enemy-expression-max) - 14px);
-    font-size: clamp(14px, 4.2vw, 17px);
+    --enemy-expression-max: var(--enemy-card-max-width-narrow);
+    --enemy-expression-min-height: var(--enemy-card-min-height-narrow);
+    --enemy-expression-padding-block: var(--enemy-card-padding-block-narrow);
+    --enemy-expression-padding-inline: var(--enemy-card-padding-inline-narrow);
+    --enemy-formula-font-size: var(--enemy-card-font-size-narrow);
+    --enemy-formula-long-font-size: var(--enemy-card-long-font-size-narrow);
+    --enemy-formula-very-long-font-size: var(--enemy-card-very-long-font-size-narrow);
+    --enemy-formula-extreme-font-size: var(--enemy-card-extreme-font-size-narrow);
+    --enemy-shield-offset: var(--enemy-card-shield-offset-narrow);
   }
 
   .enemy-mutation-marks {

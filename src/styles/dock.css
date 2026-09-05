@@ -161,6 +161,20 @@
   font: 700 0.72rem/1 var(--font-ui);
 }
 
+.guaranteed-card-badge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  z-index: 2;
+  padding: 2px 5px;
+  border: 1px solid rgba(127, 211, 179, 0.62);
+  background: rgba(13, 63, 59, 0.9);
+  color: #bff5dd;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
 .operator-copy {
   position: relative;
   z-index: 2;

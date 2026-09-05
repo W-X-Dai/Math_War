@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
 
+import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
 import { OPERATORS } from '../game/content.js';
 import { partialPreview } from '../game/engine.js';
 import { ENEMY_GUIDES } from '../game/tutorial-content.js';
@@ -12,10 +13,14 @@ const props = defineProps({
 });
 
 const tutorialHeading = ref(null);
+const configurableTowerIds = [
+  ...GAMEPLAY_CONFIG.combat.tower.configurableTypeIds,
+  GAMEPLAY_CONFIG.combat.tower.boundedTypeId,
+];
 
 defineEmits([
-  'start', 'cancel', 'confirm-partial', 'advance-enemy-tutorial', 'advance-weapon-tutorial',
-  'pause', 'restart-same', 'restart-new',
+  'cancel', 'confirm-partial', 'advance-enemy-tutorial', 'advance-weapon-tutorial',
+  'pause', 'select-level',
 ]);
 
 const preview = computed(() => (props.state.partialConfirmOpen ? partialPreview(props.state) : []));
@@ -51,8 +56,7 @@ const counterLabels = computed(() => {
   return (newWeapon.value?.counterTags ?? []).map((tag) => labels[tag] ?? tag).join('、');
 });
 const weaponSteps = computed(() => {
-  const configurable = ['definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'];
-  if (configurable.includes(newWeapon.value?.id)) {
+  if (configurableTowerIds.includes(newWeapon.value?.id)) {
     return [
       '先從軍械庫選牌，再點亮地圖空格部署。',
       newWeapon.value.id === 'definiteIntegralTower'
@@ -111,27 +115,8 @@ watch(
       </ul>
       <div class="modal-actions">
         <button class="secondary-button" type="button" data-action="cancel" @click="$emit('cancel')">返回</button>
-        <button class="primary-button" type="button" data-action="confirm-partial" @click="$emit('confirm-partial')">花費 Σ400 施放</button>
+        <button class="primary-button" type="button" data-action="confirm-partial" @click="$emit('confirm-partial')">花費 Σ{{ OPERATORS.partial.cost }} 施放</button>
       </div>
-    </article>
-  </div>
-
-  <div v-else-if="state.phase === 'intro'" class="overlay intro-overlay" role="dialog" aria-modal="true" aria-labelledby="intro-title">
-    <article class="modal intro-modal">
-      <div class="intro-mark"><span class="brand-orbit"><i></i></span></div>
-      <h1 id="intro-title">微分防線</h1>
-      <p class="intro-lead">把進攻的函數化成 0，守住證明核心。</p>
-      <div class="intro-equation">
-        <span>x⁵</span><i>→</i><span>5x⁴</span><i>→</i><span>20x³</span><i>→</i><span>60x²</span><i>→</i><span>120x</span><i>→</i><span>120</span><i>→</i><span>0</span>
-      </div>
-      <div class="intro-rules">
-        <p><strong>6 發才歸零</strong><span>常數再微分一次才會死亡，最高可造成 120 傷害。</span></p>
-        <p><strong>算子會真的改式子</strong><span>x⁵−10 傷害變 11；打錯公式，敵人反而更強。</span></p>
-        <p><strong>每局都是新證明</strong><span>六個隨機章節後進入無限輪；seed 可完整重現敵情與補給。</span></p>
-      </div>
-      <button class="primary-button intro-button" type="button" data-action="start" @click="$emit('start')">
-        開始演算 <GameIcon name="arrow" />
-      </button>
     </article>
   </div>
 
@@ -223,25 +208,9 @@ watch(
     <article class="modal compact-modal">
       <h2>演算暫停</h2>
       <p>時間、queue 與所有函數都已停止。</p>
-      <button class="primary-button" type="button" data-action="pause" @click="$emit('pause')">繼續演算</button>
-    </article>
-  </div>
-
-  <div v-else-if="state.phase === 'lost'" class="overlay" role="dialog" aria-modal="true" aria-labelledby="result-title">
-    <article class="modal result-modal is-loss">
-      <div class="result-symbol" aria-hidden="true">≠</div>
-      <h2 id="result-title">推導中斷</h2>
-      <p>有函數突破防線。你可以重現同一份試題，或換一個 seed 重新證明。</p>
-      <dl>
-        <div><dt>抵達</dt><dd>{{ state.currentWave?.name ?? (state.chapterIndex >= 6 ? `無限 ${state.endlessRound}` : `第 ${state.chapterIndex + 1} 章`) }}</dd></div>
-        <div><dt>無限輪數</dt><dd>{{ state.chapterIndex >= 6 ? Math.max(0, state.endlessRound - 1) : 0 }}</dd></div>
-        <div><dt>消去</dt><dd>{{ state.kills }}</dd></div>
-        <div><dt>最高連鎖</dt><dd>×{{ state.maxChain }}</dd></div>
-      </dl>
-      <p class="result-seed">seed <strong>{{ state.runSeed }}</strong></p>
-      <div class="modal-actions result-actions">
-        <button class="secondary-button" type="button" data-action="restart-same" @click="$emit('restart-same')">同 seed 重玩</button>
-        <button class="primary-button" type="button" data-action="restart-new" @click="$emit('restart-new')">新 seed 開局</button>
+      <div class="modal-actions">
+        <button class="secondary-button" type="button" data-action="select-level" @click="$emit('select-level')">返回選關</button>
+        <button class="primary-button" type="button" data-action="pause" @click="$emit('pause')">繼續演算</button>
       </div>
     </article>
   </div>

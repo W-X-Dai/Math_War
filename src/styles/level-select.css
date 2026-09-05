@@ -1,0 +1,636 @@
+/* Level selection and reusable progression dialogs. */
+
+.level-select-screen {
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: clamp(20px, 3vw, 48px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(22, 73, 74, 0.62), transparent 31rem),
+    linear-gradient(135deg, rgba(229, 169, 77, 0.045) 1px, transparent 1px) 0 0 / 26px 26px,
+    var(--ink-deep);
+  color: var(--parchment);
+}
+
+.level-select-header {
+  display: flex;
+  width: min(100%, 1480px);
+  margin: 0 auto clamp(22px, 3vw, 42px);
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.level-select-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: clamp(14px, 2vw, 28px);
+}
+
+.level-select-orbit {
+  width: clamp(58px, 6vw, 88px);
+  color: var(--brass-bright);
+  font-size: clamp(28px, 3.3vw, 48px);
+}
+
+.level-select-kicker {
+  margin: 0 0 7px;
+  color: var(--mint);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+
+.level-select-brand h1,
+.level-map-heading h2,
+.level-detail-panel h2,
+.level-dialog h2 {
+  margin: 0;
+  color: var(--brass-bright);
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+}
+
+.level-select-brand h1 {
+  font-size: clamp(34px, 4vw, 62px);
+  line-height: 1;
+  text-shadow: 0 2px 0 #513514, 0 0 18px rgba(229, 169, 77, 0.18);
+}
+
+.level-select-brand > div > p:last-child {
+  margin: 10px 0 0;
+  color: var(--parchment-dim);
+  line-height: 1.55;
+}
+
+.level-select-progress {
+  display: grid;
+  width: min(100%, 260px);
+  flex: 0 0 auto;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 7px 16px;
+  color: var(--parchment-dim);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+}
+
+.level-select-progress strong {
+  color: var(--brass-bright);
+  font: 800 1.45rem/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.level-select-progress progress {
+  width: 100%;
+  height: 8px;
+  grid-column: 1 / -1;
+  overflow: hidden;
+  border: 1px solid var(--brass-dark);
+  border-radius: 0;
+  background: var(--ink);
+  accent-color: var(--brass);
+}
+
+.level-select-progress progress::-webkit-progress-bar {
+  background: var(--ink);
+}
+
+.level-select-progress progress::-webkit-progress-value,
+.level-select-progress progress::-moz-progress-bar {
+  background: var(--brass);
+}
+
+.level-select-layout {
+  display: grid;
+  width: min(100%, 1480px);
+  margin-inline: auto;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  align-items: start;
+  gap: clamp(18px, 2.5vw, 36px);
+}
+
+.level-map,
+.level-detail-panel {
+  min-width: 0;
+  border: 1px solid rgba(229, 169, 77, 0.45);
+  background: rgba(4, 24, 26, 0.9);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42), inset 0 0 30px rgba(22, 73, 74, 0.15);
+}
+
+.level-map {
+  padding: clamp(17px, 2.2vw, 30px);
+}
+
+.level-map-heading {
+  display: flex;
+  margin-bottom: 18px;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.level-map-heading h2,
+.level-detail-panel h2,
+.level-dialog h2 {
+  font-size: clamp(26px, 2.6vw, 40px);
+}
+
+.level-reset-button,
+.confirmation-confirm-button {
+  min-height: 44px;
+  padding: 9px 15px;
+  border: 1px solid rgba(232, 111, 90, 0.58);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--parchment-dim);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.level-reset-button:hover,
+.confirmation-confirm-button:hover {
+  border-color: var(--coral);
+  color: #ffc1b6;
+}
+
+.level-card-grid {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 13px;
+  list-style: none;
+}
+
+.level-card-grid li {
+  min-width: 0;
+}
+
+.endless-card-item {
+  grid-column: 1 / -1;
+}
+
+.level-card {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 170px;
+  padding: 18px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--brass-dark);
+  border-radius: 2px;
+  background:
+    linear-gradient(145deg, rgba(22, 73, 74, 0.54), rgba(3, 18, 20, 0.94)),
+    var(--ink);
+  color: var(--parchment);
+  box-shadow: inset 0 0 0 1px rgba(241, 223, 182, 0.045);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.level-card:hover:not([aria-disabled="true"]),
+.level-card:focus-visible {
+  border-color: var(--brass-bright);
+  box-shadow: 0 0 18px rgba(229, 169, 77, 0.16), inset 0 0 0 1px rgba(255, 211, 124, 0.12);
+  transform: translateY(-2px);
+}
+
+.level-card.is-selected {
+  border-color: var(--brass-bright);
+  outline: 1px solid rgba(255, 211, 124, 0.26);
+  outline-offset: -6px;
+  background: linear-gradient(145deg, rgba(129, 85, 31, 0.52), rgba(4, 27, 29, 0.96));
+}
+
+.level-card.is-complete::after {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  content: "✓";
+  color: var(--mint);
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.level-card.is-locked {
+  border-color: rgba(79, 129, 120, 0.32);
+  background: rgba(4, 20, 22, 0.7);
+  color: var(--parchment-dim);
+  cursor: not-allowed;
+  opacity: 0.67;
+}
+
+.level-card-number {
+  color: var(--mint);
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.level-card strong {
+  padding-right: 18px;
+  color: var(--brass-bright);
+  font: 800 clamp(19px, 1.75vw, 27px) / 1.25 var(--font-display);
+  letter-spacing: 0.05em;
+}
+
+.level-card-theme {
+  color: var(--parchment);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.level-card-status {
+  margin-top: auto;
+  color: var(--parchment-dim);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.level-card.is-complete .level-card-status {
+  color: var(--mint);
+}
+
+.endless-level-card {
+  min-height: 116px;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 85% 50%, rgba(229, 169, 77, 0.16), transparent 25%),
+    linear-gradient(145deg, rgba(22, 73, 74, 0.56), rgba(3, 18, 20, 0.95));
+}
+
+.level-select-notice {
+  min-height: 1.5em;
+  margin: 14px 0 -6px;
+  color: var(--mint);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.level-detail-panel {
+  position: sticky;
+  top: 24px;
+  padding: clamp(20px, 2.5vw, 32px);
+}
+
+.level-detail-panel > p:not(.level-select-kicker) {
+  color: var(--parchment-dim);
+  line-height: 1.65;
+}
+
+.level-detail-theme {
+  margin: 8px 0 0;
+  color: var(--mint) !important;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.level-detail-hint {
+  margin: 18px 0;
+}
+
+.level-detail-facts,
+.result-stat-grid {
+  display: grid;
+  margin: 20px 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: 1px solid rgba(229, 169, 77, 0.34);
+}
+
+.level-detail-facts > div,
+.result-stat-grid > div {
+  min-width: 0;
+  padding: 10px 7px;
+  text-align: center;
+}
+
+.level-detail-facts > div + div,
+.result-stat-grid > div + div {
+  border-left: 1px solid rgba(229, 169, 77, 0.24);
+}
+
+.level-detail-facts dt,
+.result-stat-grid dt {
+  color: var(--parchment-dim);
+  font-size: 0.66rem;
+}
+
+.level-detail-facts dd,
+.result-stat-grid dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--brass-bright);
+  font: 800 1.03rem/1.15 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.level-detail-section {
+  margin-top: 22px;
+}
+
+.level-detail-section h3 {
+  margin: 0 0 10px;
+  color: var(--parchment);
+  font: 800 0.86rem/1.3 var(--font-display);
+  letter-spacing: 0.08em;
+}
+
+.level-detail-section p {
+  color: var(--parchment-dim);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.level-flow-list,
+.level-unlock-list,
+.level-tag-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.level-flow-list {
+  display: grid;
+  gap: 8px;
+}
+
+.level-flow-list li {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 9px;
+  color: var(--parchment-dim);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.level-flow-list strong {
+  color: var(--mint);
+}
+
+.level-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.level-tag-list li {
+  padding: 5px 8px;
+  border: 1px solid rgba(127, 211, 179, 0.34);
+  color: var(--mint);
+  font-size: 0.72rem;
+}
+
+.level-unlock-list {
+  display: grid;
+  gap: 10px;
+}
+
+.level-unlock-list li {
+  display: grid;
+  gap: 4px;
+}
+
+.level-unlock-list strong {
+  color: var(--brass-bright);
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+}
+
+.level-unlock-list span {
+  color: var(--parchment-dim);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.skip-tutorial-control {
+  display: flex;
+  min-height: 52px;
+  margin-top: 24px;
+  padding: 9px 10px;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid rgba(229, 169, 77, 0.25);
+  cursor: pointer;
+}
+
+.skip-tutorial-control input {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--brass);
+}
+
+.skip-tutorial-control span {
+  color: var(--parchment-dim);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.skip-tutorial-control strong {
+  display: block;
+  color: var(--parchment);
+  font-size: 0.78rem;
+}
+
+.level-start-button {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 18px;
+}
+
+.level-dialog-backdrop {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  padding: 20px;
+  overflow-y: auto;
+  place-items: center;
+  background: rgba(0, 8, 9, 0.86);
+  backdrop-filter: blur(6px);
+}
+
+.confirmation-dialog-backdrop {
+  z-index: 1300;
+}
+
+.level-dialog {
+  width: min(100%, 660px);
+  padding: clamp(24px, 4vw, 42px);
+  border: 1px solid var(--brass);
+  outline: 1px solid rgba(229, 169, 77, 0.28);
+  outline-offset: -7px;
+  background: #082527;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.72), inset 0 0 34px rgba(5, 14, 14, 0.72);
+  color: var(--parchment);
+}
+
+.level-dialog > p:not(.level-select-kicker) {
+  color: var(--parchment-dim);
+  line-height: 1.7;
+}
+
+.result-dialog {
+  text-align: center;
+}
+
+.result-dialog-symbol {
+  margin-bottom: 6px;
+  color: var(--mint);
+  font: 900 clamp(42px, 7vw, 72px) / 1 var(--font-math);
+}
+
+.result-dialog.is-lost .result-dialog-symbol {
+  color: var(--coral);
+}
+
+.result-stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+}
+
+.result-seed-stat dd {
+  font-size: 0.86rem;
+}
+
+.result-unlock-message,
+.result-save-warning {
+  padding: 10px 12px;
+  border: 1px solid rgba(127, 211, 179, 0.4);
+  background: rgba(127, 211, 179, 0.07);
+  color: var(--mint) !important;
+  font-size: 0.84rem;
+}
+
+.result-unlock-message strong {
+  margin-right: 9px;
+}
+
+.result-save-warning {
+  border-color: rgba(232, 111, 90, 0.58);
+  background: rgba(232, 111, 90, 0.08);
+  color: #ffc1b6 !important;
+}
+
+.level-dialog-actions {
+  display: flex;
+  margin-top: 22px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.level-dialog-actions > button {
+  min-height: 44px;
+}
+
+.result-dialog-actions {
+  justify-content: center;
+}
+
+.confirmation-dialog {
+  width: min(100%, 500px);
+}
+
+.confirmation-dialog.is-danger {
+  border-color: var(--coral);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.72), inset 0 0 34px rgba(232, 111, 90, 0.08);
+}
+
+.confirmation-confirm-button.is-danger {
+  border-color: var(--coral);
+  background: rgba(116, 30, 25, 0.55);
+  color: #ffd2ca;
+}
+
+@media (max-width: 1080px) {
+  .level-select-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .level-detail-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 700px) {
+  .level-select-screen {
+    padding: 16px 12px 28px;
+  }
+
+  .level-select-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .level-select-progress {
+    width: 100%;
+  }
+
+  .level-select-orbit {
+    width: 54px;
+  }
+
+  .level-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .endless-card-item {
+    grid-column: auto;
+  }
+
+  .level-card,
+  .endless-level-card {
+    min-height: 144px;
+  }
+
+  .level-map-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .level-reset-button {
+    width: 100%;
+  }
+
+  .level-dialog-backdrop {
+    padding: 12px;
+    place-items: start center;
+  }
+
+  .level-dialog {
+    margin-block: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-bottom));
+    padding: 24px 18px;
+  }
+
+  .level-dialog-actions,
+  .level-dialog-actions > button {
+    width: 100%;
+  }
+
+  .result-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .result-stat-grid > div:nth-child(odd) {
+    border-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .level-card,
+  .primary-button,
+  .secondary-button {
+    scroll-behavior: auto;
+    transition: none;
+  }
+}

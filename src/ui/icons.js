@@ -6,6 +6,7 @@ const paths = {
   restart: '<path d="M19 8V4l-2 2a8 8 0 1 0 2.1 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 8h5V3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
   close: '<path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   trash: '<path d="M8 8v10h8V8M6 8h12M10 5h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  shovel: '<path d="M8.2 4.7a3.2 3.2 0 0 1 4.5 0l.6.6-4.5 4.5-.6-.6a3.2 3.2 0 0 1 0-4.5ZM10.8 7.8l7.1 7.1M16 13l3.8 3.8-3 3-3.8-3.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
   arrow: '<path d="M5 12h13m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 
@@ -14,4 +15,3 @@ export function icon(name, className = '') {
   const fill = body.includes('fill="none"') ? 'none' : 'currentColor';
   return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true" fill="${fill}">${body}</svg>`;
 }
-

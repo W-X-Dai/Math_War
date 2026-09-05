@@ -1,6 +1,8 @@
 <script setup>
 import { computed } from 'vue';
 
+import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
+import { PRESENTATION_CONFIG } from '../config/presentation.js';
 import { damage, differentiate, formatExpression } from '../domain/expression.js';
 import { activeEnemyExpression, selectedEnemy } from '../game/engine.js';
 import { formatValue, prettyFormula } from '../ui/format.js';
@@ -21,6 +23,10 @@ const nextDerivative = computed(() => (
 ));
 
 const formulaText = (expression) => prettyFormula(formatExpression(expression));
+const enemyDistance = (position) => Math.max(
+  0,
+  (position - GAMEPLAY_CONFIG.geometry.basePosition) * PRESENTATION_CONFIG.battlefield.distanceScale,
+).toFixed(1);
 </script>
 
 <template>
@@ -52,7 +58,7 @@ const formulaText = (expression) => prettyFormula(formatExpression(expression));
         <span>本體攻擊（係數絕對值總和）</span><strong class="damage-value">{{ formatValue(damage(trackedEnemy.expression)) }}</strong>
       </div>
       <div class="formula-row">
-        <span>距離基地</span><strong>{{ Math.max(0, ((trackedEnemy.position - 0.125) * 8.7)).toFixed(1) }} 格</strong>
+        <span>距離基地</span><strong>{{ enemyDistance(trackedEnemy.position) }} 格</strong>
       </div>
     </template>
   </aside>

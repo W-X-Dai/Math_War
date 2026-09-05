@@ -1,9 +1,16 @@
 <script setup>
 import { computed } from 'vue';
 
+import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
+import { PRESENTATION_CONFIG } from '../config/presentation.js';
 import { formatExpression } from '../domain/expression.js';
-import { ENEMY_TYPES, OPERATORS } from '../game/content.js';
+import { CHAPTERS, ENEMY_TYPES, OPERATORS } from '../game/content.js';
 import { activeEnemyExpression, enemyThreat } from '../game/engine.js';
+import {
+  ENEMY_CARD_CSS_VARIABLES,
+  enemyCardPlacement,
+  enemyFormulaClasses,
+} from '../ui/enemy-card.js';
 import { prettyFormula } from '../ui/format.js';
 import { projectileLabel } from '../ui/projectile.js';
 import GameIcon from './GameIcon.vue';
@@ -11,17 +18,22 @@ import GameIcon from './GameIcon.vue';
 const props = defineProps({
   state: { type: Object, required: true },
   dragPayload: { type: Object, default: null },
+  dragOverTowerId: { type: String, default: null },
+  recycleArmed: { type: Boolean, default: false },
 });
 
 defineEmits(['place-tower', 'enemy', 'tower', 'cancel', 'dismiss-tutorial']);
 
-const board = computed(() => props.state.board ?? { rows: 5, columns: 8, placeableColumns: 5 });
+const { battlefield, enemyCard } = PRESENTATION_CONFIG;
+const { tower: towerConfig } = GAMEPLAY_CONFIG.combat;
+const board = computed(() => props.state.board ?? battlefield.fallbackBoard);
 const boardStyle = computed(() => {
-  const gameSpeed = Math.max(0.1, Number(props.state.speed) || 1);
+  const gameSpeed = Math.max(battlefield.minimumGameSpeed, Number(props.state.speed) || 1);
   return {
+    ...ENEMY_CARD_CSS_VARIABLES,
     '--grid-columns': board.value.columns,
     '--grid-rows': board.value.rows,
-    '--projectile-impact-duration': `${280 / gameSpeed}ms`,
+    '--projectile-impact-duration': `${battlefield.projectile.impactDurationMs / gameSpeed}ms`,
   };
 });
 const cells = computed(() => Array.from({ length: board.value.rows * board.value.columns }, (_, index) => ({
@@ -33,18 +45,16 @@ const cells = computed(() => Array.from({ length: board.value.rows * board.value
 const selectedStoredConstant = computed(() => (
   props.state.storedConstants?.find((item) => item.id === props.state.selectedStoredConstantId) ?? null
 ));
+const recycleTargeting = computed(() => (
+  props.recycleArmed || props.dragPayload?.kind === 'recycle-tool'
+));
 
 const formulaText = (expression) => prettyFormula(formatExpression(expression));
-const formulaClass = (expression) => {
-  const length = formulaText(expression).length;
-  return {
-    'is-long': length > 18,
-    'is-very-long': length > 34,
-  };
-};
+const formulaClass = (expression) => enemyFormulaClasses(formulaText(expression));
 
 // The equation is the enemy, so it stays close to the simulation coordinate.
-// Only tightly packed enemies receive a small, centered horizontal fan-out.
+// Tightly packed enemies receive a small two-dimensional fan-out. Edge lanes
+// use the free space below them so enlarged cards avoid the queue and other lanes.
 const enemyPresentation = computed(() => {
   const byRow = new Map();
   for (const enemyItem of props.state.enemies ?? []) {
@@ -65,15 +75,35 @@ const enemyPresentation = computed(() => {
       if (!group.length) return;
       const middle = (group.length - 1) / 2;
       const offsetStep = group.length > 1
-        ? Math.min(2.2, 7 / (group.length - 1))
+        ? Math.min(
+          enemyCard.clustering.maximumStepCqw,
+          enemyCard.clustering.totalSpreadCqw / (group.length - 1),
+        )
         : 0;
+      const verticalStep = group.length > 1 ? enemyCard.clustering.verticalStepPx : 0;
+      const verticalSpan = verticalStep * (group.length - 1);
+      const verticalStart = row === 0
+        ? 0
+        : row === board.value.rows - 1
+          ? Math.min(0, enemyCard.clustering.lastLaneMaximumDownwardOffsetPx - verticalSpan)
+          : -verticalSpan / 2;
+      const meanPosition = group.reduce(
+        (total, enemyItem) => total + (Number(enemyItem.position) || 0),
+        0,
+      ) / group.length;
+      const horizontalStart = meanPosition < 0.5
+        ? 0
+        : meanPosition > 0.5
+          ? -offsetStep * (group.length - 1)
+          : -middle * offsetStep;
       group.forEach((enemyItem, index) => {
         layouts.set(enemyItem.id, {
           slot: index,
           order: index,
           row,
           clusterSize: group.length,
-          chipOffset: (index - middle) * offsetStep,
+          chipOffset: horizontalStart + index * offsetStep,
+          verticalOffset: verticalStart + index * verticalStep,
         });
       });
       group = [];
@@ -81,7 +111,11 @@ const enemyPresentation = computed(() => {
 
     ordered.forEach((enemyItem) => {
       const previous = group[group.length - 1];
-      if (previous && Math.abs((Number(enemyItem.position) || 0) - (Number(previous.position) || 0)) > 0.14) {
+      if (
+        previous
+        && Math.abs((Number(enemyItem.position) || 0) - (Number(previous.position) || 0))
+          > enemyCard.clustering.maximumDistance
+      ) {
         flushGroup();
       }
       group.push(enemyItem);
@@ -96,13 +130,15 @@ function occupied(row, column) {
 }
 
 function towerConfigurable(tower) {
-  return ['subtract', 'definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'].includes(tower.typeId);
+  return tower.typeId === towerConfig.boundedTypeId
+    || towerConfig.configurableTypeIds.includes(tower.typeId);
 }
 
 function towerFilled(tower) {
-  if (tower.typeId === 'subtract') return tower.parameter !== null;
-  if (tower.typeId === 'definiteIntegralTower') return tower.lowerBound !== null && tower.upperBound !== null;
-  if (['evaluateTower', 'eulerTower', 'resonanceTower'].includes(tower.typeId)) return tower.parameter !== null;
+  if (tower.typeId === towerConfig.boundedTypeId) {
+    return tower.lowerBound !== null && tower.upperBound !== null;
+  }
+  if (towerConfig.configurableTypeIds.includes(tower.typeId)) return tower.parameter !== null;
   return true;
 }
 
@@ -117,12 +153,21 @@ function towerSlot(tower) {
 
 function towerLabel(tower) {
   if (tower.tutorialPreset) {
-    return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，教學預置且已鎖定，耐久 ${Math.max(0, Math.ceil(tower.hp))}`;
+    return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，教學預置且已鎖定，不可回收，耐久 ${Math.max(0, Math.ceil(tower.hp))}`;
   }
   const configurable = towerConfigurable(tower);
-  const interaction = selectedStoredConstant.value && configurable
-    ? `點擊裝入常數 ${selectedStoredConstant.value.value}`
-    : tower.active ? '運作中，點擊停火' : '已停火，點擊恢復';
+  let interaction = '運作中；按 Delete 可回收並取回一半算力';
+  if (recycleTargeting.value) {
+    interaction = '點擊回收並取回一半算力';
+  } else if (selectedStoredConstant.value && configurable) {
+    interaction = tower.active
+      ? `點擊裝入常數 ${selectedStoredConstant.value.value}`
+      : `運算錯誤停火；點擊重新裝填常數 ${selectedStoredConstant.value.value}`;
+  } else if (!tower.active) {
+    interaction = configurable
+      ? '運算錯誤停火；請選擇常數並重新裝填'
+      : '運算錯誤停火';
+  }
   return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，耐久 ${Math.max(0, Math.ceil(tower.hp))}，${interaction}`;
 }
 
@@ -130,20 +175,21 @@ function laneStyle(row, position) {
   return {
     '--x': `${position * 100}%`,
     '--row': row,
-    '--lane-y': `${35 + ((row + 0.5) / board.value.rows) * 50}%`,
+    '--lane-y': `${battlefield.laneArea.topPercent + ((row + 0.5) / board.value.rows) * battlefield.laneArea.heightPercent}%`,
   };
 }
 
 function enemyStyle(enemyItem) {
   const layout = enemyPresentation.value.get(enemyItem.id) ?? {
-    slot: 0, order: 0, clusterSize: 1, chipOffset: 0,
+    slot: 0, order: 0, clusterSize: 1, chipOffset: 0, verticalOffset: 0,
   };
-  const position = Number(enemyItem.position) || 0;
+  const placement = enemyCardPlacement(enemyItem.position);
   const style = {
-    ...laneStyle(enemyItem.row, enemyItem.position),
+    ...laneStyle(enemyItem.row, placement.normalizedPosition),
     '--stack-slot': layout.slot,
     '--stack-x': `${layout.chipOffset}cqw`,
-    '--enemy-anchor-x': position >= 0.88 ? '-100%' : position <= 0.18 ? '0%' : '-50%',
+    '--stack-y': `${layout.verticalOffset}px`,
+    '--enemy-anchor-x': placement.anchorPercentage,
     zIndex: 20 + layout.order,
   };
   return style;
@@ -202,7 +248,10 @@ function effectClass(effect) {
     'projectile',
     `projectile--${effect.shape ?? (effect.type === 'subtract-projectile' ? 'subtract' : 'derivative')}`,
     `is-${effect.trajectory ?? (legacyDrop ? 'drop' : 'lane')}`,
-    { 'is-impacted': effect.status === 'impacted' },
+    {
+      'is-impacted': effect.status === 'impacted',
+      'is-missed': effect.status === 'missed',
+    },
   ];
 }
 
@@ -213,8 +262,9 @@ function effectStyle(effect) {
     : 0.5;
   const row = Number(effect.row);
   const laneY = Number.isFinite(row) && row >= 0
-    ? 35 + ((row + 0.5) / board.value.rows) * 50
-    : 14;
+    ? battlefield.laneArea.topPercent
+      + ((row + 0.5) / board.value.rows) * battlefield.laneArea.heightPercent
+    : battlefield.laneArea.effectFallbackPercent;
   const style = {
     '--row': effect.row,
     '--x': `${position * 100}%`,
@@ -236,9 +286,10 @@ function effectStyle(effect) {
     style['--projectile-progress'] = progress;
     style['--projectile-x'] = `${projectileX * 100}%`;
     style['--projectile-y'] = `${projectileY}%`;
-    style['--projectile-opacity'] = Math.min(1, progress * 8);
-    style['--projectile-scale'] = 0.72 + (progress * 0.28);
-    style['--projectile-anchor-x'] = position >= 0.88 ? '-100%' : position <= 0.18 ? '0%' : '-50%';
+    style['--projectile-opacity'] = Math.min(1, progress * battlefield.projectile.opacityRamp);
+    style['--projectile-scale'] = battlefield.projectile.initialScale
+      + (progress * (battlefield.projectile.finalScale - battlefield.projectile.initialScale));
+    style['--projectile-anchor-x'] = enemyCardPlacement(position).anchorPercentage;
   }
   return style;
 }
@@ -250,7 +301,11 @@ function effectStyle(effect) {
       class="battlefield"
       data-bind="battlefield"
       :style="boardStyle"
-      :class="{ 'has-targeting': Boolean(state.targetingOperator), 'is-paused': state.paused }"
+      :class="{
+        'has-targeting': Boolean(state.targetingOperator),
+        'has-recycle-targeting': recycleTargeting,
+        'is-paused': state.paused,
+      }"
     >
       <div class="lane-labels" aria-hidden="true">
         <span v-for="lane in board.rows" :key="lane">{{ lane }}</span>
@@ -286,11 +341,12 @@ function effectStyle(effect) {
           :data-tower-id="tower.id"
           :class="{
             'is-firing': tower.fireFlash > 0,
-            'is-paused': !tower.active,
+            'is-error-stopped': !tower.active,
             'is-configurable': towerConfigurable(tower),
             'is-filled': towerConfigurable(tower) && towerFilled(tower),
-            'is-awaiting-assembly': !tower.tutorialPreset && towerConfigurable(tower) && Boolean(selectedStoredConstant),
-            'is-dragging': dragPayload?.kind === 'tower' && dragPayload.id === tower.id,
+            'is-awaiting-assembly': !recycleTargeting && !tower.tutorialPreset && towerConfigurable(tower) && Boolean(selectedStoredConstant),
+            'is-recycle-target': recycleTargeting && !tower.tutorialPreset,
+            'is-recycle-over': dragOverTowerId === tower.id,
             'is-tutorial-preset': tower.tutorialPreset,
           }"
           type="button"
@@ -298,14 +354,15 @@ function effectStyle(effect) {
           :aria-label="towerLabel(tower)"
           :aria-disabled="tower.tutorialPreset ? 'true' : undefined"
           :aria-keyshortcuts="tower.tutorialPreset ? undefined : 'Delete'"
-          :draggable="!tower.tutorialPreset"
-          :data-drag-kind="tower.tutorialPreset ? undefined : 'tower'"
-          :data-drag-id="tower.tutorialPreset ? undefined : tower.id"
+          :data-recycle-tower-id="tower.tutorialPreset ? undefined : tower.id"
           @click="!tower.tutorialPreset && $emit('tower', tower.id)"
         >
           <span class="tower-sprite" :class="OPERATORS[tower.typeId].art" aria-hidden="true"></span>
           <span class="tower-slot" aria-hidden="true">{{ towerSlot(tower) }}</span>
           <span v-if="tower.tutorialPreset" class="tutorial-preset-badge" aria-hidden="true">教學預置</span>
+          <span v-else-if="!tower.active" class="tower-error-badge" aria-hidden="true">
+            <b>運算錯誤停火</b><small>重新裝填</small>
+          </span>
           <span class="tower-status"><i :style="{ width: `${Math.max(0, tower.hp / tower.maxHp) * 100}%` }"></i></span>
         </button>
       </div>
@@ -381,7 +438,7 @@ function effectStyle(effect) {
       </div>
 
       <div class="wave-banner" data-bind="waveBanner" :class="{ 'is-visible': state.bannerTimer > 0 }" aria-live="polite">
-        {{ state.bannerTimer > 0 ? `${state.currentWave?.kind === 'tutorial' ? '教學波｜' : ''}${state.currentWave?.name ?? (state.chapterIndex === 6 ? `無限第 ${state.endlessRound} 輪` : `第 ${state.chapterIndex + 1} 章`)}` : '' }}
+        {{ state.bannerTimer > 0 ? `${state.currentWave?.kind === 'tutorial' ? '教學波｜' : ''}${state.currentWave?.name ?? (state.chapterIndex === CHAPTERS.length ? `無限第 ${state.endlessRound} 輪` : `第 ${state.chapterIndex + 1} 章`)}` : '' }}
       </div>
 
       <div class="targeting-mode" data-bind="targeting" :hidden="!state.targetingOperator">

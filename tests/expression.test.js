@@ -20,6 +20,7 @@ import {
   polynomial,
   reflectInput,
   scaleExpression,
+  substituteX,
   subtractConstant,
   trigonometric,
 } from "../src/domain/expression.js";
@@ -183,6 +184,15 @@ test("evaluateAt evaluates multivariable polynomial and exponential terms", () =
 
   assert.equal(evaluateAt(expression, 0), 4);
   assert.equal(evaluateAt(expression, 2, 4), 35 + Math.exp(-2));
+});
+
+test("substituteX preserves y while f(0) can still annihilate an x factor", () => {
+  const xySquared = polynomial([{ coefficient: 1, xPower: 1, yPower: 2 }]);
+
+  assert.equal(formatExpression(substituteX(xySquared, 1)), "y^2");
+  assert.equal(formatExpression(substituteX(xySquared, 0)), "0");
+  assert.equal(formatExpression(differentiate(xySquared)), "y^2");
+  assert.equal(isZero(differentiate(xySquared, "x", 2)), true);
 });
 
 test("definite integral of x from zero to five is 12.5", () => {

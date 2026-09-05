@@ -4,18 +4,18 @@ import {
   damage,
   definiteIntegral,
   differentiate,
-  evaluateAt,
   formatExpression,
   integrate,
   isEulerCompatible,
   isZero,
   limitAtInfinity,
   multiplyByX,
-  polynomial,
   reflectInput,
   scaleExpression,
+  substituteX,
   subtractConstant,
 } from '../domain/expression.js';
+import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
 import {
   BOARD,
   CHAPTERS,
@@ -34,22 +34,23 @@ import {
   OPERATORS,
   STORED_CONSTANT_CAPACITY,
 } from './content.js';
-import { generateEndlessWave, generateFiniteWave } from './level-generator.js';
+import { generateEndlessWave, generateFiniteSegment } from './level-generator.js';
 import { chapterTutorial, generateTutorialWave } from './tutorial-content.js';
 
-const GRID_START = 0.155;
-const GRID_END = 0.89;
-const BASE_POSITION = 0.125;
-const ATTACK_INTERVAL = 1.15;
-const ENERGY_INTERVAL = 5;
-const ENERGY_GAIN = 25;
-const PROJECTILE_TRAVEL_SECONDS = Object.freeze({
-  lane: 0.52,
-  drop: 0.56,
-});
-const PROJECTILE_IMPACT_LINGER = 0.3;
+const {
+  combat: COMBAT,
+  economy: ECONOMY,
+  effects: EFFECTS,
+  geometry: GEOMETRY,
+  initialState: INITIAL_STATE,
+  limits: LIMITS,
+  simulation: SIMULATION,
+  wave: WAVE,
+} = GAMEPLAY_CONFIG;
 const towerPosition = (column, board = BOARD) => (
-  GRID_START + ((column + 0.5) / board.columns) * (GRID_END - GRID_START)
+  GEOMETRY.gridStart
+  + ((column + GEOMETRY.cellCenterOffset) / board.columns)
+    * (GEOMETRY.gridEnd - GEOMETRY.gridStart)
 );
 
 const nextId = (state, prefix) => `${prefix}-${state.nextEntityId++}`;
@@ -65,17 +66,17 @@ function formulaCard(id) {
 
 function drawFormulaCard(state) {
   const index = Math.floor(seededRandom(state) * FORMULA_CARDS.length);
-  return { id: nextId(state, 'formula'), cardId: FORMULA_CARDS[index].id };
+  return { id: nextId(state, 'formula'), cardId: FORMULA_CARDS[index].id, source: 'random' };
 }
 
 function drawGodConstant(state) {
   const index = Math.floor(seededRandom(state) * GOD_CONSTANT_VALUES.length);
-  return { id: nextId(state, 'constant'), value: GOD_CONSTANT_VALUES[index] };
+  return { id: nextId(state, 'constant'), value: GOD_CONSTANT_VALUES[index], source: 'random' };
 }
 
 function operatorCounterWeight(operator, requiredTags) {
   const matches = (operator.counterTags ?? []).filter((tag) => requiredTags.includes(tag)).length;
-  return 1 + matches * 3;
+  return ECONOMY.operatorDrawBaseWeight + matches * ECONOMY.operatorDrawCounterTagBonus;
 }
 
 function drawOperatorCard(state) {
@@ -84,7 +85,8 @@ function drawOperatorCard(state) {
     return map;
   }, {});
   let candidates = Object.values(OPERATORS).filter((operator) => (
-    operator.unlockChapter <= state.chapterIndex && (counts[operator.id] ?? 0) < 3
+    operator.unlockChapter <= state.chapterIndex
+    && (counts[operator.id] ?? 0) < ECONOMY.operatorDrawMaxCopies
   ));
   if (candidates.length === 0) {
     candidates = Object.values(OPERATORS).filter((operator) => operator.unlockChapter <= state.chapterIndex);
@@ -99,16 +101,16 @@ function drawOperatorCard(state) {
     roll -= operatorCounterWeight(operator, requiredTags);
     return roll <= 0;
   }) ?? candidates.at(-1);
-  return { id: nextId(state, 'operator'), operatorId: selected.id };
+  return { id: nextId(state, 'operator'), operatorId: selected.id, source: 'random' };
 }
 
 function addLog(state, equation, tone = 'neutral') {
   state.logs.unshift({ id: nextId(state, 'log'), equation, tone });
-  state.logs = state.logs.slice(0, 8);
+  state.logs = state.logs.slice(0, LIMITS.logEntries);
 }
 
 function addEffect(state, effect) {
-  const createdEffect = { id: nextId(state, 'fx'), ttl: 0.9, ...effect };
+  const createdEffect = { id: nextId(state, 'fx'), ttl: EFFECTS.defaultLifetimeSeconds, ...effect };
   state.effects.push(createdEffect);
   return createdEffect;
 }
@@ -117,7 +119,7 @@ function addOperatorProjectile(state, operatorId, target, source = null, details
   const projectile = OPERATORS[operatorId]?.projectile;
   if (!projectile) throw new Error(`Missing projectile configuration for ${operatorId}`);
   const delay = Math.max(0, Number(details.delay) || 0);
-  const travelTime = PROJECTILE_TRAVEL_SECONDS[projectile.trajectory];
+  const travelTime = EFFECTS.projectileTravelSeconds[projectile.trajectory];
   const impactIn = delay + travelTime;
   return addEffect(state, {
     type: 'projectile',
@@ -137,7 +139,7 @@ function addOperatorProjectile(state, operatorId, target, source = null, details
     status: 'flying',
     impactResolved: false,
     missed: false,
-    ttl: impactIn + PROJECTILE_IMPACT_LINGER,
+    ttl: impactIn + EFFECTS.projectileImpactLingerSeconds,
   });
 }
 
@@ -173,7 +175,7 @@ function spawnEnemy(state, entry) {
     art: entry.art ?? type.art ?? 'enemy-art-polynomial',
     family: entry.family ?? 'polynomial',
     row,
-    position: 0.955,
+    position: GEOMETRY.enemySpawnPosition,
     expression,
     speed: entry.speed ?? type.speed,
     reward: entry.reward ?? type.reward,
@@ -191,7 +193,7 @@ function spawnEnemy(state, entry) {
 
 function spawnSplitChildren(state, enemy) {
   if (!enemy.affixes?.includes('split') || !enemy.splitExpressions?.length) return;
-  enemy.splitExpressions.slice(0, 2).forEach((expression, index) => {
+  enemy.splitExpressions.slice(0, COMBAT.split.maxChildren).forEach((expression, index) => {
     state.enemies.push({
       id: nextId(state, 'enemy'),
       typeId: `${enemy.typeId}-child`,
@@ -199,15 +201,22 @@ function spawnSplitChildren(state, enemy) {
       art: enemy.art,
       family: enemy.family,
       row: enemy.row,
-      position: Math.min(0.97, enemy.position + 0.014 * index),
+      position: Math.min(
+        COMBAT.split.maximumPosition,
+        enemy.position + COMBAT.split.positionOffset * index,
+      ),
       expression: cloneExpression(expression),
-      speed: enemy.speed * 1.05,
-      reward: Math.max(8, Math.ceil(enemy.reward * 0.35)),
+      speed: enemy.speed * COMBAT.split.childSpeedMultiplier,
+      reward: Math.max(
+        COMBAT.split.minimumReward,
+        Math.ceil(enemy.reward * COMBAT.split.childRewardMultiplier),
+      ),
       affixes: [],
       shieldExpression: null,
       shieldActive: false,
       splitExpressions: [],
-      attackTimer: 0.35 + index * 0.12,
+      attackTimer: COMBAT.split.firstAttackDelaySeconds
+        + index * COMBAT.split.attackDelayStepSeconds,
       divergentTimer: 0,
       hitFlash: 0,
     });
@@ -216,16 +225,19 @@ function spawnSplitChildren(state, enemy) {
     type: 'split',
     row: enemy.row,
     position: enemy.position,
-    label: `分裂 ×${Math.min(2, enemy.splitExpressions.length)}`,
+    label: `分裂 ×${Math.min(COMBAT.split.maxChildren, enemy.splitExpressions.length)}`,
   });
 }
 
 function finishEnemy(state, enemy, reason) {
   if (enemy.dead) return;
   enemy.dead = true;
-  const baseReward = enemy.reward ?? ENEMY_TYPES[enemy.typeId]?.reward ?? 20;
+  const baseReward = enemy.reward ?? ENEMY_TYPES[enemy.typeId]?.reward ?? ECONOMY.fallbackEnemyReward;
   const reward = enemy.affixes?.includes('split')
-    ? Math.max(8, Math.ceil(baseReward * 0.6))
+    ? Math.max(
+      COMBAT.split.minimumReward,
+      Math.ceil(baseReward * COMBAT.split.parentRewardMultiplier),
+    )
     : baseReward;
   state.energy += reward;
   state.kills += 1;
@@ -244,7 +256,7 @@ function finishEnemy(state, enemy, reason) {
 function transformEnemy(state, enemy, nextExpression, source, previousText) {
   const nextText = formatExpression(nextExpression);
   if (hasActiveShield(enemy)) {
-    enemy.hitFlash = 0.32;
+    enemy.hitFlash = COMBAT.enemyHitFlashSeconds;
     if (!isZero(nextExpression)) {
       enemy.shieldExpression = nextExpression;
       enemy.shieldActive = true;
@@ -274,7 +286,7 @@ function transformEnemy(state, enemy, nextExpression, source, previousText) {
   }
 
   enemy.expression = nextExpression;
-  enemy.hitFlash = 0.32;
+  enemy.hitFlash = COMBAT.enemyHitFlashSeconds;
   addEffect(state, {
     type: 'operator',
     row: enemy.row,
@@ -308,7 +320,7 @@ function evaluateOperatorOutcome(operatorId, targetExpression, details = {}) {
     };
   }
   if (operatorId === 'evaluateTower') {
-    return { kind: 'transform', expression: polynomial(evaluateAt(targetExpression, details.parameter)) };
+    return { kind: 'transform', expression: substituteX(targetExpression, details.parameter) };
   }
   if (operatorId === 'resonanceTower') {
     return {
@@ -350,7 +362,7 @@ function reportOperatorError(state, operatorId, previousText, error, sourceTower
     : null;
   if (tower) {
     tower.active = false;
-    notify(state, '運算遇到定義域或自由變數；這座塔已停火。', 'danger');
+    notify(state, '運算錯誤停火；重新裝填參數後可恢復。', 'danger');
   } else {
     notify(state, `命中時無法作用：${reason}`, 'danger');
   }
@@ -364,7 +376,7 @@ function resolveProjectileImpact(state, effect, enemy, frameDt) {
   effect.impactIn = 0;
   // updateTransientState subtracts this frame immediately after resolution;
   // include it so even a long or 2× frame still renders the full hit pulse.
-  effect.ttl = PROJECTILE_IMPACT_LINGER + frameDt;
+  effect.ttl = EFFECTS.projectileImpactLingerSeconds + frameDt;
   effect.row = enemy.row;
   effect.position = enemy.position;
 
@@ -401,17 +413,44 @@ function resolveProjectileImpact(state, effect, enemy, frameDt) {
     return;
   }
 
-  enemy.divergentTimer = 6;
-  enemy.hitFlash = 0.4;
+  enemy.divergentTimer = COMBAT.divergence.durationSeconds;
+  enemy.hitFlash = COMBAT.divergence.hitFlashSeconds;
   addEffect(state, {
     type: 'divergent',
     row: enemy.row,
     position: enemy.position,
-    label: '發散！×2',
+    label: `發散！×${COMBAT.divergence.damageMultiplier}`,
   });
   const label = outcome.result.status === 'oscillating' ? '極限不存在' : '發散';
-  addLog(state, `lim∞ ${previousText} ${label}：敵人暴走 6 秒`, 'danger');
-  notify(state, `${label}！移速 ×1.5、傷害 ×2。`, 'danger');
+  addLog(
+    state,
+    `lim∞ ${previousText} ${label}：敵人暴走 ${COMBAT.divergence.durationSeconds} 秒`,
+    'danger',
+  );
+  notify(
+    state,
+    `${label}！移速 ×${COMBAT.divergence.speedMultiplier}、傷害 ×${COMBAT.divergence.damageMultiplier}。`,
+    'danger',
+  );
+}
+
+function advanceProjectileFlight(effect, dt) {
+  const reachesDestination = effect.impactIn <= dt + 1e-9;
+  effect.impactIn = reachesDestination ? 0 : effect.impactIn - dt;
+  const elapsed = effect.delay + effect.travelTime - effect.impactIn;
+  effect.progress = Math.max(0, Math.min(1, (elapsed - effect.delay) / effect.travelTime));
+  return reachesDestination;
+}
+
+function resolveProjectileMiss(effect, frameDt) {
+  effect.status = 'missed';
+  effect.impactResolved = true;
+  effect.missed = true;
+  effect.progress = 1;
+  effect.impactIn = 0;
+  // Keep the projectile at its original destination long enough for the
+  // presentation layer to fade it instead of removing it between frames.
+  effect.ttl = EFFECTS.projectileImpactLingerSeconds + frameDt;
 }
 
 function attackEnemy(state, tower, enemy) {
@@ -441,17 +480,23 @@ function nearestEnemyInLane(state, tower) {
     .filter((enemy) => (
       !enemy.dead
       && enemy.row === tower.row
-      && enemy.position >= tower.position - 0.035
+      && enemy.position >= tower.position - COMBAT.tower.targetRearTolerance
       && (tower.typeId !== 'eulerTower' || isEulerCompatible(activeEnemyExpression(enemy)))
     ))
     .sort((a, b) => a.position - b.position)[0] ?? null;
 }
 
 function updateTowers(state, dt) {
-  for (const tower of state.towers) {
-    const awaitingParameter = ['subtract', 'evaluateTower', 'eulerTower', 'resonanceTower'].includes(tower.typeId)
+  // Enemies advance from right to left. Resolve towers from the forward edge
+  // back toward the core so a D → Euler lane really follows its board order,
+  // regardless of which tower the player happened to deploy first.
+  const firingOrder = [...state.towers].sort((left, right) => (
+    right.position - left.position
+  ));
+  for (const tower of firingOrder) {
+    const awaitingParameter = COMBAT.tower.configurableTypeIds.includes(tower.typeId)
       && tower.parameter === null;
-    const awaitingBounds = tower.typeId === 'definiteIntegralTower'
+    const awaitingBounds = tower.typeId === COMBAT.tower.boundedTypeId
       && (tower.lowerBound === null || tower.upperBound === null);
     if (!tower.active || awaitingParameter || awaitingBounds) continue;
     tower.cooldown -= dt;
@@ -459,28 +504,33 @@ function updateTowers(state, dt) {
 
     const target = nearestEnemyInLane(state, tower);
     if (!target) {
-      tower.cooldown = Math.min(tower.cooldown, 0);
+      // A ready tower may wait indefinitely, but it must not bank missed
+      // cooldown cycles and burst several projectiles when a target appears.
+      tower.cooldown = 0;
       continue;
     }
 
     if (attackEnemy(state, tower, target)) {
       tower.cooldown += OPERATORS[tower.typeId].cooldown;
-      tower.fireFlash = 0.28;
+      tower.fireFlash = COMBAT.towerFireFlashSeconds;
     }
   }
 }
 
 function blockingTower(state, enemy) {
   return state.towers
-    .filter((tower) => tower.row === enemy.row && tower.position <= enemy.position + 0.014)
+    .filter((tower) => (
+      tower.row === enemy.row
+      && tower.position <= enemy.position + COMBAT.tower.blockerForwardTolerance
+    ))
     .sort((a, b) => b.position - a.position)
-    .find((tower) => enemy.position - tower.position < 0.065) ?? null;
+    .find((tower) => enemy.position - tower.position < COMBAT.tower.blockingDistance) ?? null;
 }
 
 function enemyMovementSpeed(enemy) {
-  const speedMultiplier = enemy.divergentTimer > 0 ? 1.5 : 1;
-  const affixMultiplier = enemy.affixes?.includes('fast') ? 1.35 : 1;
-  const baseSpeed = enemy.speed ?? ENEMY_TYPES[enemy.typeId]?.speed ?? 0.015;
+  const speedMultiplier = enemy.divergentTimer > 0 ? COMBAT.divergence.speedMultiplier : 1;
+  const affixMultiplier = enemy.affixes?.includes('fast') ? COMBAT.fastAffixSpeedMultiplier : 1;
+  const baseSpeed = enemy.speed ?? ENEMY_TYPES[enemy.typeId]?.speed ?? COMBAT.defaultEnemySpeed;
   return baseSpeed * speedMultiplier * affixMultiplier;
 }
 
@@ -488,11 +538,12 @@ function timeUntilBase(state, enemy) {
   if (blockingTower(state, enemy)) return Number.POSITIVE_INFINITY;
   const movementSpeed = enemyMovementSpeed(enemy);
   if (movementSpeed <= 0) return Number.POSITIVE_INFINITY;
-  return Math.max(0, (enemy.position - BASE_POSITION) / movementSpeed);
+  return Math.max(0, (enemy.position - GEOMETRY.basePosition) / movementSpeed);
 }
 
 function strike(state, enemy, tower) {
-  const hit = Math.max(1, Math.ceil(damage(enemy.expression))) * (enemy.divergentTimer > 0 ? 2 : 1);
+  const hit = Math.max(COMBAT.minimumDamage, Math.ceil(damage(enemy.expression)))
+    * (enemy.divergentTimer > 0 ? COMBAT.divergence.damageMultiplier : 1);
   if (tower) {
     tower.hp -= hit;
     addEffect(state, {
@@ -510,7 +561,12 @@ function strike(state, enemy, tower) {
 
   state.baseHp = Math.max(0, state.baseHp - hit);
   state.chain = 0;
-  addEffect(state, { type: 'base-damage', row: enemy.row, position: BASE_POSITION, label: `−${hit}` });
+  addEffect(state, {
+    type: 'base-damage',
+    row: enemy.row,
+    position: GEOMETRY.basePosition,
+    label: `−${hit}`,
+  });
   addLog(state, `${formatExpression(enemy.expression)} 對基地造成 ${hit} 傷害`, 'danger');
 }
 
@@ -518,7 +574,7 @@ function updateEnemies(state, dt) {
   for (const enemy of state.enemies) {
     if (enemy.dead) continue;
 
-    const atBase = enemy.position <= BASE_POSITION;
+    const atBase = enemy.position <= GEOMETRY.basePosition;
     if (atBase) {
       // Reaching the proof core is a leak, not a new combat target: settle the
       // current coefficient damage once, then remove the enemy without reward.
@@ -531,13 +587,16 @@ function updateEnemies(state, dt) {
     if (blocker) {
       if (enemy.attackTimer <= 0) {
         strike(state, enemy, blocker);
-        enemy.attackTimer = ATTACK_INTERVAL;
+        enemy.attackTimer = COMBAT.enemyAttackIntervalSeconds;
       }
       continue;
     }
 
-    enemy.position = Math.max(BASE_POSITION, enemy.position - enemyMovementSpeed(enemy) * dt);
-    if (enemy.position <= BASE_POSITION) {
+    enemy.position = Math.max(
+      GEOMETRY.basePosition,
+      enemy.position - enemyMovementSpeed(enemy) * dt,
+    );
+    if (enemy.position <= GEOMETRY.basePosition) {
       strike(state, enemy, null);
       enemy.dead = true;
     }
@@ -557,13 +616,12 @@ function updateProjectileImpacts(state, dt) {
     const target = state.enemies.find((enemy) => (
       enemy.id === effect.targetId
       && !enemy.dead
-      && enemy.position > BASE_POSITION
+      && enemy.position > GEOMETRY.basePosition
     ));
     if (!target) {
-      effect.status = 'missed';
-      effect.impactResolved = true;
-      effect.missed = true;
-      effect.ttl = 0;
+      // The shot keeps its original target snapshot. It must not retarget or
+      // deal damage, but should visibly finish the route it already started.
+      if (advanceProjectileFlight(effect, dt)) resolveProjectileMiss(effect, dt);
       continue;
     }
 
@@ -572,19 +630,15 @@ function updateProjectileImpacts(state, dt) {
     // updateEnemies will settle the body damage later in the same tick.
     const baseIn = timeUntilBase(state, target);
     if (baseIn <= dt + 1e-9 && baseIn + 1e-9 < effect.impactIn) {
-      effect.status = 'missed';
-      effect.impactResolved = true;
-      effect.missed = true;
-      effect.ttl = 0;
+      effect.row = target.row;
+      effect.position = GEOMETRY.basePosition;
+      if (advanceProjectileFlight(effect, dt)) resolveProjectileMiss(effect, dt);
       continue;
     }
 
     effect.row = target.row;
     effect.position = target.position;
-    const reachesTarget = effect.impactIn <= dt + 1e-9;
-    effect.impactIn = reachesTarget ? 0 : effect.impactIn - dt;
-    const elapsed = effect.delay + effect.travelTime - effect.impactIn;
-    effect.progress = Math.max(0, Math.min(1, (elapsed - effect.delay) / effect.travelTime));
+    const reachesTarget = advanceProjectileFlight(effect, dt);
     if (reachesTarget) resolveProjectileImpact(state, effect, target, dt);
   }
 }
@@ -618,7 +672,12 @@ function updateQueues(state, dt) {
       state.formulaQueue.push(item);
       if (!state.selectedFormulaId) state.selectedFormulaId = item.id;
       state.formulaCooldown = FORMULA_QUEUE_INTERVAL;
-      addEffect(state, { type: 'queue', row: -1, position: 0.94, label: '+ 公式' });
+      addEffect(state, {
+        type: 'queue',
+        row: GEOMETRY.effectRow,
+        position: GEOMETRY.formulaAndConstantQueueEffectPosition,
+        label: '+ 公式',
+      });
     }
   }
 
@@ -629,7 +688,12 @@ function updateQueues(state, dt) {
       state.constantQueue.push(item);
       if (!state.selectedConstantId) state.selectedConstantId = item.id;
       state.constantCooldown = CONSTANT_QUEUE_INTERVAL;
-      addEffect(state, { type: 'queue', row: -1, position: 0.94, label: '+ k' });
+      addEffect(state, {
+        type: 'queue',
+        row: GEOMETRY.effectRow,
+        position: GEOMETRY.formulaAndConstantQueueEffectPosition,
+        label: '+ k',
+      });
     }
   }
 
@@ -638,7 +702,12 @@ function updateQueues(state, dt) {
     if (state.operatorCooldown <= 0) {
       state.operatorQueue.push(drawOperatorCard(state));
       state.operatorCooldown = OPERATOR_QUEUE_INTERVAL;
-      addEffect(state, { type: 'queue', row: -1, position: 0.9, label: '+ 軍械' });
+      addEffect(state, {
+        type: 'queue',
+        row: GEOMETRY.effectRow,
+        position: GEOMETRY.operatorQueueEffectPosition,
+        label: '+ 軍械',
+      });
     }
   }
 }
@@ -666,39 +735,42 @@ function checkWaveState(state) {
   const allSpawned = state.nextSpawnIndex >= wave.entries.length;
   const noneAlive = !state.enemies.some((enemy) => !enemy.dead);
   if (!allSpawned || !noneAlive) return;
-  // Let Vue render the final glyph at contact and finish its short hit pulse
-  // before configureWave clears effects for the next chapter or tutorial.
-  if (state.effects.some((effect) => (
-    effect.type === 'projectile' && effect.status === 'impacted'
-  ))) return;
+  // Let every launched projectile finish its flight and resolution animation
+  // before configureWave clears effects for the next segment or tutorial.
+  if (state.effects.some((effect) => effect.type === 'projectile')) return;
   state.enemies = state.enemies.filter((enemy) => !enemy.dead);
   clearProjectiles(state);
 
   if (wave.kind === 'tutorial') {
-    prepareFiniteChallenge(state);
+    prepareFiniteSegment(state, 1);
     return;
   }
 
-  if (state.chapterIndex < CHAPTERS.length - 1) {
-    const completedName = CHAPTERS[state.chapterIndex].name;
-    state.baseHp = Math.min(state.maxBaseHp, state.baseHp + state.maxBaseHp * 0.2);
-    resetForChapter(state, state.chapterIndex + 1);
-    addLog(state, `${completedName}完成；基地修復 100，進入${CHAPTERS[state.chapterIndex].name}`, 'success');
+  if (state.chapterIndex < CHAPTERS.length && wave.segmentIndex === 1) {
+    prepareFiniteSegment(state, 2);
+    addLog(state, `${CHAPTERS[state.chapterIndex].name}壓力段完成；混合段整備開始`, 'success');
     return;
   }
 
-  if (state.chapterIndex === CHAPTERS.length - 1) {
-    const completedName = CHAPTERS[state.chapterIndex].name;
-    state.baseHp = Math.min(state.maxBaseHp, state.baseHp + state.maxBaseHp * 0.2);
-    resetForChapter(state, CHAPTERS.length);
-    addLog(state, `${completedName}完成；無限證明已展開`, 'success');
+  if (state.chapterIndex < CHAPTERS.length) {
+    state.phase = 'won';
+    state.selectedOperator = null;
+    state.selectedOperatorItemId = null;
+    state.targetingOperator = null;
+    state.partialConfirmOpen = false;
+    addLog(state, `${CHAPTERS[state.chapterIndex].name}完成！`, 'success');
     return;
   }
 
   state.endlessRound += 1;
   state.currentWave = generateEndlessWave(state.runSeed, state.endlessRound);
+  grantGuaranteedSupply(state, state.currentWave);
   state.phase = 'preparing';
-  state.prepDuration = Math.max(10, 32 - 2 * state.endlessRound);
+  state.prepDuration = Math.max(
+    WAVE.endlessMinimumPreparationSeconds,
+    WAVE.endlessPreparationBaseSeconds
+      - WAVE.endlessPreparationDecreasePerRoundSeconds * state.endlessRound,
+  );
   state.prepRemaining = state.prepDuration;
   state.waveClock = 0;
   state.nextSpawnIndex = 0;
@@ -708,16 +780,12 @@ function checkWaveState(state) {
   state.selectedOperator = null;
   state.selectedOperatorItemId = null;
   state.targetingOperator = null;
-  state.bannerTimer = 2.4;
+  state.bannerTimer = EFFECTS.endlessBannerSeconds;
   addLog(state, `無限第 ${state.endlessRound - 1} 輪完成；下一輪整備 ${state.prepDuration} 秒`, 'success');
 }
 
-function queueItems(state, prefix, values, valueKey) {
-  return values.map((value) => ({ id: nextId(state, prefix), [valueKey]: value }));
-}
-
-function chapterConfig(index) {
-  return index < CHAPTERS.length ? CHAPTERS[index] : ENDLESS_CHAPTER;
+function queueItems(state, prefix, values, valueKey, source = 'tutorial') {
+  return values.map((value) => ({ id: nextId(state, prefix), [valueKey]: value, source }));
 }
 
 export function chapterWeaponTutorials(chapterIndex) {
@@ -731,13 +799,13 @@ export function chapterEnemyTutorials(chapterIndex) {
 }
 
 function towerHp(typeId) {
-  if (typeId === 'definiteIntegralTower') return 180;
-  if (['secondDerivative', 'resonanceTower', 'eulerTower'].includes(typeId)) return 150;
-  return 120;
+  if (typeId === COMBAT.tower.boundedTypeId) return COMBAT.tower.boundedHp;
+  if (COMBAT.tower.durableTypeIds.includes(typeId)) return COMBAT.tower.durableHp;
+  return COMBAT.tower.defaultHp;
 }
 
 function createPresetTower(state, spec) {
-  const configurable = ['subtract', 'evaluateTower', 'eulerTower', 'resonanceTower'].includes(spec.typeId);
+  const configurable = COMBAT.tower.configurableTypeIds.includes(spec.typeId);
   const hp = towerHp(spec.typeId);
   return {
     id: nextId(state, 'tutorial-tower'),
@@ -747,47 +815,101 @@ function createPresetTower(state, spec) {
     position: towerPosition(spec.column, state.board),
     hp,
     maxHp: hp,
-    cooldown: 0.25,
+    cooldown: COMBAT.tower.presetInitialCooldownSeconds,
     fireFlash: 0,
     active: true,
     parameter: configurable ? (spec.parameter ?? null) : undefined,
-    lowerBound: spec.typeId === 'definiteIntegralTower' ? (spec.lowerBound ?? null) : undefined,
-    upperBound: spec.typeId === 'definiteIntegralTower' ? (spec.upperBound ?? null) : undefined,
+    lowerBound: spec.typeId === COMBAT.tower.boundedTypeId ? (spec.lowerBound ?? null) : undefined,
+    upperBound: spec.typeId === COMBAT.tower.boundedTypeId ? (spec.upperBound ?? null) : undefined,
     tutorialPreset: true,
   };
 }
 
-function configureWave(state, config, supply, wave, presetTowers = []) {
-  state.energy = config.startingEnergy;
+function resetWaveRuntime(state, wave) {
   state.enemies = [];
   state.effects = [];
-  state.operatorQueue = queueItems(state, 'operator', supply.starterOperators, 'operatorId');
-  state.formulaQueue = queueItems(state, 'formula', supply.starterFormulaIds, 'cardId');
-  state.constantQueue = queueItems(state, 'constant', supply.starterConstants, 'value');
-  state.operatorCooldown = OPERATOR_QUEUE_INTERVAL;
-  state.formulaCooldown = FORMULA_QUEUE_INTERVAL;
-  state.constantCooldown = CONSTANT_QUEUE_INTERVAL;
   state.selectedOperatorItemId = null;
   state.selectedOperator = null;
   state.targetingOperator = null;
-  state.selectedFormulaId = state.formulaQueue[0]?.id ?? null;
-  state.selectedConstantId = state.constantQueue[0]?.id ?? null;
   state.selectedEnemyId = null;
-  if (!state.storedConstants.some((item) => item.id === state.selectedStoredConstantId)) {
-    state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
-  }
   state.partialConfirmOpen = false;
   state.partialUsed = false;
   state.energyClock = 0;
   state.chain = 0;
   state.waveClock = 0;
   state.nextSpawnIndex = 0;
-  state.prepDuration = 30;
-  state.prepRemaining = 30;
+  state.prepDuration = WAVE.finitePreparationSeconds;
+  state.prepRemaining = WAVE.finitePreparationSeconds;
   state.currentWave = wave;
+  state.segmentIndex = wave.segmentIndex ?? 0;
+  state.waveIndex = state.chapterIndex * 3 + state.segmentIndex;
   state.phase = 'preparing';
-  state.bannerTimer = 2.6;
+  state.bannerTimer = EFFECTS.waveBannerSeconds;
+}
+
+function configureWave(state, config, supply, wave, presetTowers = [], source = 'tutorial') {
+  state.energy = config.startingEnergy;
+  state.operatorQueue = queueItems(state, 'operator', supply.starterOperators, 'operatorId', source);
+  state.formulaQueue = queueItems(state, 'formula', supply.starterFormulaIds, 'cardId', source);
+  state.constantQueue = queueItems(state, 'constant', supply.starterConstants, 'value', source);
+  state.operatorCooldown = OPERATOR_QUEUE_INTERVAL;
+  state.formulaCooldown = FORMULA_QUEUE_INTERVAL;
+  state.constantCooldown = CONSTANT_QUEUE_INTERVAL;
+  state.selectedFormulaId = state.formulaQueue[0]?.id ?? null;
+  state.selectedConstantId = state.constantQueue[0]?.id ?? null;
+  if (!state.storedConstants.some((item) => item.id === state.selectedStoredConstantId)) {
+    state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
+  }
   state.towers = presetTowers.map((tower) => createPresetTower(state, tower));
+  resetWaveRuntime(state, wave);
+}
+
+function grantGuaranteedSupply(state, wave) {
+  const supply = wave?.guaranteedSupply;
+  if (!supply) return false;
+  const grantId = `${wave.id}:guaranteed`;
+  if (state.receivedSupplyGrantIds.includes(grantId)) return false;
+
+  state.operatorQueue.push(...queueItems(
+    state,
+    'operator',
+    supply.operators ?? supply.starterOperators ?? [],
+    'operatorId',
+    'guaranteed',
+  ));
+  state.formulaQueue.push(...queueItems(
+    state,
+    'formula',
+    supply.formulaIds ?? supply.starterFormulaIds ?? [],
+    'cardId',
+    'guaranteed',
+  ));
+  state.constantQueue.push(...queueItems(
+    state,
+    'constant',
+    supply.constants ?? supply.starterConstants ?? [],
+    'value',
+    'guaranteed',
+  ));
+  state.receivedSupplyGrantIds.push(grantId);
+  if (!state.selectedFormulaId) state.selectedFormulaId = state.formulaQueue[0]?.id ?? null;
+  if (!state.selectedConstantId) state.selectedConstantId = state.constantQueue[0]?.id ?? null;
+  addLog(state, `保障補給已送達：軍械 ${supply.operators?.length ?? 0}、公式 ${supply.formulaIds?.length ?? 0}、k ${supply.constants?.length ?? 0}`, 'success');
+  return true;
+}
+
+function configurePersistentWave(state, wave) {
+  if (!state.formulaQueue.some((item) => item.id === state.selectedFormulaId)) {
+    state.selectedFormulaId = state.formulaQueue[0]?.id ?? null;
+  }
+  if (!state.constantQueue.some((item) => item.id === state.selectedConstantId)) {
+    state.selectedConstantId = state.constantQueue[0]?.id ?? null;
+  }
+  if (!state.storedConstants.some((item) => item.id === state.selectedStoredConstantId)) {
+    state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
+  }
+  resetWaveRuntime(state, wave);
+  grantGuaranteedSupply(state, wave);
 }
 
 function snapshotTutorialState(state) {
@@ -796,8 +918,19 @@ function snapshotTutorialState(state) {
     kills: state.kills,
     maxChain: state.maxChain,
     rngState: state.rngState,
+    energy: state.energy,
+    operatorQueue: state.operatorQueue.map((item) => ({ ...item })),
+    formulaQueue: state.formulaQueue.map((item) => ({ ...item })),
+    constantQueue: state.constantQueue.map((item) => ({ ...item })),
+    operatorCooldown: state.operatorCooldown,
+    formulaCooldown: state.formulaCooldown,
+    constantCooldown: state.constantCooldown,
+    selectedFormulaId: state.selectedFormulaId,
+    selectedConstantId: state.selectedConstantId,
     storedConstants: state.storedConstants.map((item) => ({ ...item })),
     selectedStoredConstantId: state.selectedStoredConstantId,
+    towers: state.towers.map((tower) => ({ ...tower })),
+    receivedSupplyGrantIds: [...state.receivedSupplyGrantIds],
   };
 }
 
@@ -808,8 +941,19 @@ function restoreTutorialState(state) {
   state.kills = snapshot.kills;
   state.maxChain = snapshot.maxChain;
   state.rngState = snapshot.rngState;
+  state.energy = snapshot.energy;
+  state.operatorQueue = snapshot.operatorQueue.map((item) => ({ ...item }));
+  state.formulaQueue = snapshot.formulaQueue.map((item) => ({ ...item }));
+  state.constantQueue = snapshot.constantQueue.map((item) => ({ ...item }));
+  state.operatorCooldown = snapshot.operatorCooldown;
+  state.formulaCooldown = snapshot.formulaCooldown;
+  state.constantCooldown = snapshot.constantCooldown;
+  state.selectedFormulaId = snapshot.selectedFormulaId;
+  state.selectedConstantId = snapshot.selectedConstantId;
   state.storedConstants = snapshot.storedConstants.map((item) => ({ ...item }));
   state.selectedStoredConstantId = snapshot.selectedStoredConstantId;
+  state.towers = snapshot.towers.map((tower) => ({ ...tower }));
+  state.receivedSupplyGrantIds = [...snapshot.receivedSupplyGrantIds];
 }
 
 function setupTutorialWave(state, chapterIndex, showIntroductions) {
@@ -827,61 +971,112 @@ function restartTutorialWave(state) {
   notify(state, '教學波已重置，再試一次。', 'neutral');
 }
 
-function prepareFiniteChallenge(state) {
+function prepareFiniteSegment(state, segmentIndex) {
   const completedTutorial = state.currentWave.name;
-  restoreTutorialState(state);
-  const config = CHAPTERS[state.chapterIndex];
-  configureWave(state, config, config, generateFiniteWave(state.runSeed, state.chapterIndex));
+  if (state.currentWave.kind === 'tutorial') restoreTutorialState(state);
+  configurePersistentWave(
+    state,
+    generateFiniteSegment(state.runSeed, state.chapterIndex, segmentIndex),
+  );
   state.enemyTutorialQueue = [];
   state.weaponTutorialQueue = [];
   state.tutorialSnapshot = null;
-  addLog(state, `${completedTutorial}完成；正式隨機波整備開始。`, 'success');
+  if (segmentIndex === 1) {
+    addLog(state, `${completedTutorial}完成；壓力段整備開始。`, 'success');
+  }
 }
 
-function resetForChapter(state, chapterIndex) {
-  const config = chapterConfig(chapterIndex);
-  state.chapterIndex = chapterIndex;
-  state.waveIndex = chapterIndex;
-  state.endlessRound = chapterIndex >= CHAPTERS.length ? 1 : 0;
+function initializeLevel(state, levelIndex, skipTutorial) {
+  const config = CHAPTERS[levelIndex];
+  state.chapterIndex = levelIndex;
+  state.levelIndex = levelIndex;
+  state.endlessRound = 0;
   state.board = { ...config.board };
-  if (chapterIndex < CHAPTERS.length) {
-    state.tutorialSnapshot = snapshotTutorialState(state);
-    setupTutorialWave(state, chapterIndex, true);
+  configureWave(
+    state,
+    config,
+    config,
+    generateFiniteSegment(state.runSeed, levelIndex, 1),
+    [],
+    'starter',
+  );
+  state.enemyTutorialQueue = [];
+  state.weaponTutorialQueue = [];
+
+  if (skipTutorial) {
+    state.tutorialSnapshot = null;
+    grantGuaranteedSupply(state, state.currentWave);
     return;
   }
+
+  state.tutorialSnapshot = snapshotTutorialState(state);
+  setupTutorialWave(state, levelIndex, true);
+}
+
+function initializeEndless(state) {
+  state.chapterIndex = CHAPTERS.length;
+  state.levelIndex = null;
+  state.endlessRound = 1;
+  state.board = { ...ENDLESS_CHAPTER.board };
   state.tutorialSnapshot = null;
   state.enemyTutorialQueue = [];
   state.weaponTutorialQueue = [];
-  configureWave(state, config, config, generateEndlessWave(state.runSeed, 1));
+  configureWave(
+    state,
+    ENDLESS_CHAPTER,
+    ENDLESS_CHAPTER,
+    generateEndlessWave(state.runSeed, 1),
+    [],
+    'starter',
+  );
+  grantGuaranteedSupply(state, state.currentWave);
 }
 
-export function createGame(seed = 20260905) {
+export function createGame(seed = INITIAL_STATE.defaultSeed, options = {}) {
+  const mode = options?.mode ?? 'level';
+  if (mode !== 'level' && mode !== 'endless') {
+    throw new RangeError("mode must be either 'level' or 'endless'");
+  }
+  const levelIndex = options?.levelIndex ?? 0;
+  if (
+    mode === 'level'
+    && (!Number.isInteger(levelIndex) || levelIndex < 0 || levelIndex >= CHAPTERS.length)
+  ) {
+    throw new RangeError(`levelIndex must be between 0 and ${CHAPTERS.length - 1}`);
+  }
+  const skipTutorial = mode === 'level' && options?.skipTutorial === true;
   const normalizedSeed = Number(seed) >>> 0;
+  const initialConfig = mode === 'endless' ? ENDLESS_CHAPTER : CHAPTERS[levelIndex];
   const state = {
     phase: 'intro',
+    mode,
+    levelIndex: mode === 'level' ? levelIndex : null,
+    skipTutorial,
     paused: false,
-    speed: 1,
+    speed: INITIAL_STATE.normalSimulationSpeed,
     sound: true,
-    baseHp: 500,
-    maxBaseHp: 500,
-    energy: 0,
+    baseHp: INITIAL_STATE.baseHp,
+    maxBaseHp: INITIAL_STATE.baseHp,
+    energy: initialConfig.startingEnergy,
     runSeed: normalizedSeed,
-    chapterIndex: 0,
-    endlessRound: 0,
-    board: { ...CHAPTERS[0].board },
+    chapterIndex: mode === 'endless' ? CHAPTERS.length : levelIndex,
+    segmentIndex: 0,
+    endlessRound: mode === 'endless' ? 1 : 0,
+    board: { ...initialConfig.board },
     waveIndex: 0,
     waveClock: 0,
     nextSpawnIndex: 0,
     energyClock: 0,
     currentWave: null,
-    prepDuration: 30,
-    prepRemaining: 30,
+    prepDuration: WAVE.finitePreparationSeconds,
+    prepRemaining: WAVE.finitePreparationSeconds,
     formulaQueue: [],
     formulaCooldown: FORMULA_QUEUE_INTERVAL,
     constantQueue: [],
     constantCooldown: CONSTANT_QUEUE_INTERVAL,
     operatorQueue: [],
     operatorCooldown: OPERATOR_QUEUE_INTERVAL,
+    receivedSupplyGrantIds: [],
     selectedFormulaId: null,
     selectedConstantId: null,
     selectedOperatorItemId: null,
@@ -896,7 +1091,7 @@ export function createGame(seed = 20260905) {
     selectedEnemyId: null,
     partialConfirmOpen: false,
     partialUsed: false,
-    tutorialVisible: true,
+    tutorialVisible: mode === 'level' && !skipTutorial,
     enemyTutorialQueue: [],
     weaponTutorialQueue: [],
     tutorialSnapshot: null,
@@ -907,12 +1102,13 @@ export function createGame(seed = 20260905) {
     kills: 0,
     chain: 0,
     maxChain: 0,
-    nextEntityId: 100,
+    nextEntityId: INITIAL_STATE.firstEntityId,
     rngState: (normalizedSeed ^ 0xa511e9b3) >>> 0,
   };
-  resetForChapter(state, 0);
+  if (mode === 'endless') initializeEndless(state);
+  else initializeLevel(state, levelIndex, skipTutorial);
   state.phase = 'intro';
-  state.tutorialVisible = true;
+  state.tutorialVisible = mode === 'level' && !skipTutorial;
   state.logs = [];
   return state;
 }
@@ -920,17 +1116,30 @@ export function createGame(seed = 20260905) {
 export function startGame(state) {
   if (state.phase !== 'intro') return false;
   state.phase = 'preparing';
-  state.tutorialVisible = true;
-  addLog(state, '第 1 章教學開始：先認識新敵人與固定教具。', 'success');
+  if (state.mode === 'endless') {
+    state.tutorialVisible = false;
+    addLog(state, '無限證明第 1 輪整備開始。', 'success');
+  } else if (state.skipTutorial) {
+    state.tutorialVisible = false;
+    addLog(state, `第 ${state.chapterIndex + 1} 關壓力段整備開始；已略過教學。`, 'success');
+  } else {
+    state.tutorialVisible = true;
+    addLog(state, `第 ${state.chapterIndex + 1} 關教學開始：先認識新敵人與固定教具。`, 'success');
+  }
   return true;
 }
 
 function beginWave(state, awardEarly) {
   if (state.phase !== 'preparing') return false;
-  const bonusSeconds = awardEarly && state.currentWave.kind !== 'tutorial'
+  const bonusSeconds = awardEarly
+    && state.currentWave.kind !== 'tutorial'
+    && state.currentWave.awardsEarlyStart !== false
     ? Math.ceil(Math.max(0, state.prepRemaining))
     : 0;
-  const bonus = Math.min(150, bonusSeconds * 5);
+  const bonus = Math.min(
+    ECONOMY.earlyStartEnergyCap,
+    bonusSeconds * ECONOMY.earlyStartEnergyPerSecond,
+  );
   if (bonus > 0) {
     state.energy += bonus;
     addLog(state, `提早開戰：${bonusSeconds} 秒轉為 Σ${bonus}`, 'success');
@@ -943,7 +1152,7 @@ function beginWave(state, awardEarly) {
   state.selectedOperator = null;
   state.selectedOperatorItemId = null;
   state.targetingOperator = null;
-  state.bannerTimer = 2.6;
+  state.bannerTimer = EFFECTS.waveBannerSeconds;
   addLog(state, `${state.currentWave.name}：開始迎擊`, 'success');
   return true;
 }
@@ -958,7 +1167,7 @@ export function startWave(state) {
 
 export function tick(state, rawDt) {
   if (state.paused) return;
-  const dt = Math.min(rawDt, 0.2) * state.speed;
+  const dt = Math.min(rawDt, SIMULATION.maximumStepSeconds) * state.speed;
   updateTransientState(state, dt);
 
   if (state.phase === 'preparing') {
@@ -970,8 +1179,8 @@ export function tick(state, rawDt) {
   }
   if (state.phase !== 'running') return;
 
-  // A final hit may keep its impact pulse alive briefly. During that visual-only
-  // linger, do not advance combat clocks, refill queues, or consume RNG.
+  // Final projectiles may still be flying or resolving. During that visual-only
+  // interval, do not advance combat clocks, refill queues, or consume RNG.
   if (
     state.nextSpawnIndex >= state.currentWave.entries.length
     && !state.enemies.some((enemy) => !enemy.dead)
@@ -982,10 +1191,15 @@ export function tick(state, rawDt) {
 
   state.waveClock += dt;
   state.energyClock += dt;
-  while (state.energyClock >= ENERGY_INTERVAL) {
-    state.energyClock -= ENERGY_INTERVAL;
-    state.energy += ENERGY_GAIN;
-    addEffect(state, { type: 'energy', row: -1, position: 0.82, label: `Σ +${ENERGY_GAIN}` });
+  while (state.energyClock >= ECONOMY.energyRefillIntervalSeconds) {
+    state.energyClock -= ECONOMY.energyRefillIntervalSeconds;
+    state.energy += ECONOMY.energyRefillAmount;
+    addEffect(state, {
+      type: 'energy',
+      row: GEOMETRY.effectRow,
+      position: GEOMETRY.energyEffectPosition,
+      label: `Σ +${ECONOMY.energyRefillAmount}`,
+    });
   }
 
   const wave = state.currentWave;
@@ -1007,7 +1221,7 @@ export function tick(state, rawDt) {
 function notify(state, text, tone = 'neutral') {
   state.toast = text;
   state.toastTone = tone;
-  state.toastTimer = 2.4;
+  state.toastTimer = EFFECTS.toastSeconds;
 }
 
 export function selectArsenalItem(state, itemId) {
@@ -1091,10 +1305,8 @@ export function placeTower(state, row, column) {
 
   state.energy -= operator.cost;
   consumeOperatorItem(state);
-  const hp = operator.id === 'definiteIntegralTower' ? 180
-    : ['secondDerivative', 'resonanceTower', 'eulerTower'].includes(operator.id) ? 150
-      : 120;
-  const configurable = ['subtract', 'evaluateTower', 'eulerTower', 'resonanceTower'].includes(operator.id);
+  const hp = towerHp(operator.id);
+  const configurable = COMBAT.tower.configurableTypeIds.includes(operator.id);
   state.towers.push({
     id: nextId(state, 'tower'),
     typeId: operator.id,
@@ -1103,12 +1315,14 @@ export function placeTower(state, row, column) {
     position: towerPosition(column, state.board),
     hp,
     maxHp: hp,
-    cooldown: operator.id === 'subtract' ? 0.7 : 0.25,
+    cooldown: operator.id === 'subtract'
+      ? COMBAT.tower.subtractInitialCooldownSeconds
+      : COMBAT.tower.defaultInitialCooldownSeconds,
     fireFlash: 0,
     active: true,
     parameter: configurable ? null : undefined,
-    lowerBound: operator.id === 'definiteIntegralTower' ? null : undefined,
-    upperBound: operator.id === 'definiteIntegralTower' ? null : undefined,
+    lowerBound: operator.id === COMBAT.tower.boundedTypeId ? null : undefined,
+    upperBound: operator.id === COMBAT.tower.boundedTypeId ? null : undefined,
   });
   state.selectedOperator = null;
   state.selectedOperatorItemId = null;
@@ -1116,26 +1330,26 @@ export function placeTower(state, row, column) {
   return true;
 }
 
-export function toggleTower(state, towerId) {
-  const tower = state.towers.find((candidate) => candidate.id === towerId);
-  if (!tower) return false;
-  tower.active = !tower.active;
-  notify(state, `${OPERATORS[tower.typeId].name}${tower.active ? '恢復運算' : '暫停運算'}`, tower.active ? 'success' : 'neutral');
-  return true;
-}
-
-export function discardTower(state, towerId) {
+export function recycleTower(state, towerId) {
   const tower = state.towers.find((candidate) => candidate.id === towerId);
   if (!tower) return false;
   if (tower.tutorialPreset) {
-    notify(state, '教學預置砲台不能丟棄。', 'neutral');
+    notify(state, '教學預置砲台不能回收。', 'neutral');
     return false;
   }
+  const refund = Math.floor(
+    OPERATORS[tower.typeId].cost * ECONOMY.towerRecycleRefundFraction,
+  );
   state.towers = state.towers.filter((candidate) => candidate.id !== towerId);
-  addLog(state, `拆除 ${OPERATORS[tower.typeId].name}（算力不退還）`, 'danger');
-  notify(state, '砲台已丟棄，算力不退還。', 'neutral');
+  state.energy += refund;
+  addLog(state, `回收 ${OPERATORS[tower.typeId].name}，返還 Σ${refund}`, 'success');
+  notify(state, `砲台已回收，補償 Σ${refund}。`, 'success');
   return true;
 }
+
+// Compatibility for non-UI callers. The former discard action now follows the
+// same half-price recycling rule as the shovel interaction.
+export const discardTower = recycleTower;
 
 export function selectEnemy(state, enemyId) {
   state.selectedEnemyId = enemyId;
@@ -1148,7 +1362,7 @@ export function applyTargetOperator(state, enemyId) {
   const enemy = state.enemies.find((candidate) => (
     candidate.id === enemyId
     && !candidate.dead
-    && candidate.position > BASE_POSITION
+    && candidate.position > GEOMETRY.basePosition
   ));
   if (!operator || operatorItem?.operatorId !== operatorId || !enemy || state.energy < operator.cost) return false;
 
@@ -1192,7 +1406,9 @@ export function confirmPartial(state) {
     || operatorItem?.operatorId !== 'partial'
     || state.energy < operator.cost
   ) return false;
-  const targets = state.enemies.filter((enemy) => !enemy.dead && enemy.position > BASE_POSITION);
+  const targets = state.enemies.filter((enemy) => (
+    !enemy.dead && enemy.position > GEOMETRY.basePosition
+  ));
   if (targets.length === 0) {
     notify(state, '目前沒有可命中的敵人，偏微分尚未施放。', 'neutral');
     return false;
@@ -1205,7 +1421,10 @@ export function confirmPartial(state) {
 
   targets.forEach((enemy, index) => {
     addOperatorProjectile(state, 'partial', enemy, null, {
-      delay: Math.min(index * 0.035, 0.18),
+      delay: Math.min(
+        index * EFFECTS.partialProjectileStaggerSeconds,
+        EFFECTS.partialProjectileMaximumDelaySeconds,
+      ),
     });
   });
   notify(state, `全場偏微分已發射 ${targets.length} 枚彈頭。`, 'success');
@@ -1214,7 +1433,7 @@ export function confirmPartial(state) {
 
 export function partialPreview(state) {
   return state.enemies.filter((enemy) => (
-    !enemy.dead && enemy.position > BASE_POSITION
+    !enemy.dead && enemy.position > GEOMETRY.basePosition
   )).map((enemy) => {
     const shielded = hasActiveShield(enemy);
     const beforeExpression = activeEnemyExpression(enemy);
@@ -1259,7 +1478,9 @@ export function advanceEnemyTutorial(state) {
 }
 
 export function toggleSpeed(state) {
-  state.speed = state.speed === 1 ? 2 : 1;
+  state.speed = state.speed === INITIAL_STATE.normalSimulationSpeed
+    ? INITIAL_STATE.fastSimulationSpeed
+    : INITIAL_STATE.normalSimulationSpeed;
 }
 
 export function currentWave(state) {
@@ -1271,7 +1492,8 @@ export function selectedEnemy(state) {
 }
 
 export function enemyThreat(enemy) {
-  return Math.max(0, Math.ceil(damage(enemy.expression))) * (enemy.divergentTimer > 0 ? 2 : 1);
+  return Math.max(0, Math.ceil(damage(enemy.expression)))
+    * (enemy.divergentTimer > 0 ? COMBAT.divergence.damageMultiplier : 1);
 }
 
 export function getTowerPosition(column, board = BOARD) {
@@ -1396,8 +1618,11 @@ export function installAssembly(state, towerId) {
   const stored = state.storedConstants.find((item) => item.id === state.selectedStoredConstantId);
   if (!stored) return false;
   const tower = state.towers.find((candidate) => candidate.id === towerId);
-  const configurable = ['subtract', 'definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'];
-  if (!tower || !configurable.includes(tower.typeId)) {
+  const configurable = tower && (
+    COMBAT.tower.configurableTypeIds.includes(tower.typeId)
+    || tower.typeId === COMBAT.tower.boundedTypeId
+  );
+  if (!configurable) {
     notify(state, '這座塔沒有可裝入常數的空槽。', 'danger');
     return false;
   }
@@ -1430,7 +1655,11 @@ export function installAssembly(state, towerId) {
   state.storedConstants = state.storedConstants.filter((item) => item.id !== stored.id);
   state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
   tower.active = true;
-  notify(state, tower.typeId === 'definiteIntegralTower' ? '積分界已裝入。' : '參數塔已啟動。', 'success');
+  notify(
+    state,
+    tower.typeId === COMBAT.tower.boundedTypeId ? '積分界已裝入。' : '參數塔已啟動。',
+    'success',
+  );
   return true;
 }
 

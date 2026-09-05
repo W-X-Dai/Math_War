@@ -1,3 +1,4 @@
+import { GAMEPLAY_CONFIG } from '../src/config/gameplay.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -28,6 +29,7 @@ import {
   partialPreview,
   placeTower,
   prepareAssembly,
+  recycleTower,
   selectArsenalItem,
   selectConstantItem,
   selectFormulaItem,
@@ -63,6 +65,8 @@ function testEnemy(expression, overrides = {}) {
 }
 
 function freezeSpawns(state) {
+  // Isolate combat assertions from periodic income, even with long flight settings.
+  state.energyClock = -1000;
   state.currentWave = { ...state.currentWave, entries: [{ spawnAt: 999, row: 0 }] };
   state.nextSpawnIndex = 0;
   state.phase = 'running';
@@ -103,7 +107,7 @@ function assertProjectile(effect, operatorId, expected = {}) {
   assert.equal(effect.impactResolved, false);
   assert.equal(effect.missed, false);
   assert.equal(effect.progress, 0);
-  assert.equal(effect.travelTime, effect.trajectory === 'lane' ? 0.52 : 0.56);
+  assert.equal(effect.travelTime, GAMEPLAY_CONFIG.effects.projectileTravelSeconds[effect.trajectory]);
   assert.equal(effect.impactIn, effect.travelTime + (effect.delay ?? 0));
   for (const [key, value] of Object.entries(expected)) assert.equal(effect[key], value);
 }
@@ -113,10 +117,13 @@ function dismissIntroductions(state) {
   while (state.weaponTutorialQueue.length > 0) assert.equal(advanceWeaponTutorial(state), true);
 }
 
-test('a seeded game starts with the deterministic chapter tutorial and fixed loadout', () => {
+test('the compatible default starts level one with its deterministic tutorial sandbox', () => {
   const first = createGame(12345);
-  const replay = createGame(12345);
+  const replay = createGame(12345, { mode: 'level', levelIndex: 0, skipTutorial: false });
   assert.equal(first.phase, 'intro');
+  assert.equal(first.mode, 'level');
+  assert.equal(first.levelIndex, 0);
+  assert.equal(first.skipTutorial, false);
   assert.equal(first.runSeed, 12345);
   assert.deepEqual(first.currentWave, replay.currentWave);
   assert.equal(first.currentWave.kind, 'tutorial');
@@ -126,9 +133,93 @@ test('a seeded game starts with the deterministic chapter tutorial and fixed loa
   assert.deepEqual(first.operatorQueue.map((item) => item.operatorId), CHAPTER_TUTORIALS[0].starterOperators);
   assert.equal(first.towers.length, CHAPTER_TUTORIALS[0].presetTowers.length);
   assert.ok(first.towers.every((tower) => tower.tutorialPreset));
+  assert.deepEqual(
+    first.tutorialSnapshot.operatorQueue.map((item) => item.operatorId),
+    CHAPTERS[0].starterOperators,
+  );
+  assert.deepEqual(
+    first.tutorialSnapshot.formulaQueue.map((item) => item.cardId),
+    CHAPTERS[0].starterFormulaIds,
+  );
+  assert.deepEqual(
+    first.tutorialSnapshot.constantQueue.map((item) => item.value),
+    CHAPTERS[0].starterConstants,
+  );
   const presetTowerCount = first.towers.length;
   assert.equal(discardTower(first, first.towers[0].id), false);
   assert.equal(first.towers.length, presetTowerCount);
+});
+
+test('all six levels can start independently with their own fresh formal loadout', () => {
+  for (const [levelIndex, chapter] of CHAPTERS.entries()) {
+    const state = createGame(12000 + levelIndex, {
+      mode: 'level',
+      levelIndex,
+      skipTutorial: true,
+    });
+    assert.equal(state.phase, 'intro');
+    assert.equal(state.mode, 'level');
+    assert.equal(state.chapterIndex, levelIndex);
+    assert.equal(state.levelIndex, levelIndex);
+    assert.equal(state.skipTutorial, true);
+    assert.equal(state.baseHp, state.maxBaseHp);
+    assert.equal(state.energy, chapter.startingEnergy);
+    assert.deepEqual(state.board, chapter.board);
+    assert.deepEqual(
+      state.operatorQueue.filter((item) => item.source === 'starter').map((item) => item.operatorId),
+      chapter.starterOperators,
+    );
+    assert.deepEqual(
+      state.formulaQueue.filter((item) => item.source === 'starter').map((item) => item.cardId),
+      chapter.starterFormulaIds,
+    );
+    assert.deepEqual(
+      state.constantQueue.filter((item) => item.source === 'starter').map((item) => item.value),
+      chapter.starterConstants,
+    );
+    assert.equal(state.towers.length, 0);
+    assert.equal(state.storedConstants.length, 0);
+    assert.equal(state.kills, 0);
+    assert.equal(state.maxChain, 0);
+    assert.equal(state.currentWave.segmentIndex, 1);
+    assert.deepEqual(state.currentWave, generateFiniteWave(12000 + levelIndex, levelIndex, 1));
+    assert.equal(state.enemyTutorialQueue.length, 0);
+    assert.equal(state.weaponTutorialQueue.length, 0);
+    assert.equal(state.tutorialSnapshot, null);
+    assert.equal(state.receivedSupplyGrantIds.length, 1);
+  }
+});
+
+test('starting another level never inherits resources or statistics from the previous game', () => {
+  const previous = createGame(99, { levelIndex: 4, skipTutorial: true });
+  previous.baseHp = 7;
+  previous.energy = 1;
+  previous.kills = 20;
+  previous.maxChain = 12;
+  previous.towers.push(configuredTower('derivative'));
+  previous.storedConstants.push({ id: 'old-constant', value: 9 });
+
+  const next = createGame(100, { levelIndex: 2, skipTutorial: true });
+  assert.equal(next.baseHp, next.maxBaseHp);
+  assert.equal(next.energy, CHAPTERS[2].startingEnergy);
+  assert.equal(next.kills, 0);
+  assert.equal(next.maxChain, 0);
+  assert.equal(next.towers.length, 0);
+  assert.equal(next.storedConstants.length, 0);
+});
+
+test('startGame logs the selected level path or independent endless mode', () => {
+  const tutorial = createGame(1, { levelIndex: 3 });
+  assert.equal(startGame(tutorial), true);
+  assert.match(tutorial.logs[0].equation, /第 4 關教學開始/);
+
+  const skipped = createGame(2, { levelIndex: 3, skipTutorial: true });
+  assert.equal(startGame(skipped), true);
+  assert.match(skipped.logs[0].equation, /第 4 關壓力段整備開始；已略過教學/);
+
+  const endless = createGame(3, { mode: 'endless' });
+  assert.equal(startGame(endless), true);
+  assert.match(endless.logs[0].equation, /無限證明第 1 輪整備開始/);
 });
 
 test('tutorial preparation starts without an early-start bonus', () => {
@@ -143,7 +234,7 @@ test('tutorial preparation starts without an early-start bonus', () => {
   assert.equal(state.prepRemaining, 0);
 });
 
-test('formal challenge preparation awards five energy per displayed second', () => {
+test('only the pressure segment awards early-start energy', () => {
   const state = createGame(101);
   startGame(state);
   dismissIntroductions(state);
@@ -155,6 +246,14 @@ test('formal challenge preparation awards five energy per displayed second', () 
   assert.equal(state.currentWave.kind, 'challenge');
   assert.equal(startWave(state), true);
   assert.equal(state.energy, before + 150);
+
+  state.currentWave = { ...state.currentWave, entries: [] };
+  state.nextSpawnIndex = 0;
+  tick(state, 0.01);
+  assert.equal(state.currentWave.segmentIndex, 2);
+  const beforeMixed = state.energy;
+  assert.equal(startWave(state), true);
+  assert.equal(state.energy, beforeMixed);
 });
 
 test('preparation auto-starts without bonus and pause freezes its clock', () => {
@@ -175,18 +274,18 @@ test('preparation auto-starts without bonus and pause freezes its clock', () => 
 test('new enemies and weapons pause preparation until their introductions are read', () => {
   assert.deepEqual(chapterWeaponTutorials(0), ['derivative', 'subtract']);
   assert.deepEqual(chapterWeaponTutorials(1), ['secondDerivative', 'integral']);
-  assert.deepEqual(chapterWeaponTutorials(2), ['definiteIntegralTower']);
+  assert.deepEqual(chapterWeaponTutorials(2), ['limit', 'eulerTower']);
   assert.deepEqual(chapterWeaponTutorials(3), ['partial', 'evaluateTower']);
-  assert.deepEqual(chapterWeaponTutorials(4), ['limit', 'eulerTower']);
-  assert.deepEqual(chapterWeaponTutorials(5), ['reflect', 'resonanceTower']);
+  assert.deepEqual(chapterWeaponTutorials(4), ['definiteIntegralTower', 'resonanceTower']);
+  assert.deepEqual(chapterWeaponTutorials(5), ['reflect']);
   assert.deepEqual(chapterWeaponTutorials(CHAPTERS.length), []);
-  assert.deepEqual(chapterEnemyTutorials(0), ['polynomial', 'affix-fast']);
-  assert.deepEqual(chapterEnemyTutorials(4), ['rational', 'logarithmic', 'affix-split']);
+  assert.deepEqual(chapterEnemyTutorials(0), ['constant', 'polynomial']);
+  assert.deepEqual(chapterEnemyTutorials(4), ['trigonometric']);
   assert.deepEqual(chapterEnemyTutorials(CHAPTERS.length), []);
 
   const state = createGame(111);
   startGame(state);
-  assert.deepEqual(state.enemyTutorialQueue, ['polynomial', 'affix-fast']);
+  assert.deepEqual(state.enemyTutorialQueue, ['constant', 'polynomial']);
   assert.deepEqual(state.weaponTutorialQueue, ['derivative', 'subtract']);
 
   const prepBefore = state.prepRemaining;
@@ -197,7 +296,7 @@ test('new enemies and weapons pause preparation until their introductions are re
   assert.equal(startWave(state), false);
 
   assert.equal(advanceEnemyTutorial(state), true);
-  assert.deepEqual(state.enemyTutorialQueue, ['affix-fast']);
+  assert.deepEqual(state.enemyTutorialQueue, ['polynomial']);
   assert.equal(advanceEnemyTutorial(state), true);
   assert.deepEqual(state.enemyTutorialQueue, []);
   assert.equal(advanceWeaponTutorial(state), true);
@@ -229,7 +328,18 @@ test('clearing a tutorial wave restores sandbox state and opens the seeded chall
   assert.equal(state.kills, 0);
   assert.equal(state.maxChain, 0);
   assert.equal(state.towers.length, 0);
-  assert.deepEqual(state.operatorQueue.map((item) => item.operatorId), CHAPTERS[0].starterOperators);
+  assert.deepEqual(
+    state.operatorQueue.map((item) => item.operatorId),
+    [...CHAPTERS[0].starterOperators, ...state.currentWave.guaranteedSupply.operators],
+  );
+  assert.deepEqual(
+    state.operatorQueue.filter((item) => item.source === 'starter').map((item) => item.operatorId),
+    CHAPTERS[0].starterOperators,
+  );
+  assert.deepEqual(
+    state.operatorQueue.filter((item) => item.source === 'guaranteed').map((item) => item.operatorId),
+    state.currentWave.guaranteedSupply.operators,
+  );
   assert.deepEqual(state.currentWave, generateFiniteWave(112, 0));
 });
 
@@ -259,6 +369,19 @@ test('placing a tower consumes one matching card and its energy cost', () => {
   assert.equal(state.energy, energyBefore - OPERATORS.derivative.cost);
   assert.equal(state.operatorQueue.filter((card) => card.operatorId === 'derivative').length, countBefore - 1);
   assert.equal(state.selectedOperatorItemId, null);
+});
+
+test('recycling a player tower returns half its original cost regardless of damage', () => {
+  const state = createGame(120);
+  const tower = configuredTower('secondDerivative', undefined, { hp: 17, maxHp: 150 });
+  state.towers = [tower];
+  state.energy = 9;
+
+  assert.equal(recycleTower(state, tower.id), true);
+  assert.equal(state.energy, 9 + OPERATORS.secondDerivative.cost / 2);
+  assert.equal(state.towers.length, 0);
+  assert.match(state.logs[0].equation, /返還/);
+  assert.equal(recycleTower(state, tower.id), false);
 });
 
 test('failed arsenal selection keeps both card and energy', () => {
@@ -394,53 +517,87 @@ test('any arsenal, formula, or constant item can be discarded', () => {
   assert.equal(state.constantQueue.some((item) => item.id === constant.id), false);
 });
 
-test('chapter completion repairs HP and resets map, economy, towers, and queues', () => {
-  const state = createGame(17);
-  state.phase = 'running';
-  state.currentWave = { ...state.currentWave, kind: 'challenge', entries: [] };
-  state.nextSpawnIndex = 0;
-  state.baseHp = 350;
+test('pressure resources continue into mixed and clearing mixed wins the selected level', () => {
+  const state = createGame(17, { levelIndex: 1, skipTutorial: true });
+  startGame(state);
   state.energy = 1;
   state.storedConstants = [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }];
   state.selectedStoredConstantId = 'persistent-constant';
-  state.towers.push(configuredTower('derivative'));
+  const persistentTower = configuredTower('eulerTower', 2, {
+    id: 'persistent-tower', row: 3, column: 3, hp: 77, maxHp: 150,
+  });
+  state.towers.push(persistentTower);
+  state.operatorQueue.push({ id: 'persistent-card', operatorId: 'derivative', source: 'random' });
+  state.baseHp = 350;
+
+  state.phase = 'running';
+  state.currentWave = { ...state.currentWave, entries: [] };
+  state.nextSpawnIndex = 0;
   tick(state, 0.01);
+
   assert.equal(state.chapterIndex, 1);
   assert.equal(state.phase, 'preparing');
-  assert.equal(state.baseHp, 450);
-  assert.equal(state.energy, CHAPTERS[1].startingEnergy);
+  assert.equal(state.currentWave.segmentIndex, 2);
+  assert.equal(state.baseHp, 350);
+  assert.equal(state.energy, 1);
   assert.deepEqual(state.board, CHAPTERS[1].board);
-  assert.equal(state.towers.length, CHAPTER_TUTORIALS[1].presetTowers.length);
-  assert.ok(state.towers.every((tower) => tower.tutorialPreset));
-  assert.equal(state.currentWave.kind, 'tutorial');
-  assert.deepEqual(state.operatorQueue.map((item) => item.operatorId), CHAPTER_TUTORIALS[1].starterOperators);
-  assert.deepEqual(state.enemyTutorialQueue, ['constant']);
   assert.deepEqual(state.storedConstants, [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }]);
   assert.equal(state.selectedStoredConstantId, 'persistent-constant');
+  assert.ok(state.operatorQueue.some((item) => item.id === 'persistent-card'));
+  const continuedTower = state.towers.find((tower) => tower.id === persistentTower.id);
+  assert.equal(continuedTower.hp, 77);
+  assert.equal(continuedTower.parameter, 2);
+
+  state.phase = 'running';
+  state.currentWave = { ...state.currentWave, entries: [] };
+  state.nextSpawnIndex = 0;
+  tick(state, 0.01);
+
+  assert.equal(state.phase, 'won');
+  assert.equal(state.chapterIndex, 1);
+  assert.equal(state.currentWave.segmentIndex, 2);
+  assert.equal(state.baseHp, 350);
+  assert.equal(state.energy, 1);
+  assert.ok(state.operatorQueue.some((item) => item.id === 'persistent-card'));
+  assert.equal(state.towers.find((tower) => tower.id === persistentTower.id).hp, 77);
 });
 
-test('entering endless resets once, then later rounds preserve the defense', () => {
-  const state = createGame(18);
-  state.chapterIndex = CHAPTERS.length - 1;
-  state.waveIndex = state.chapterIndex;
-  state.phase = 'running';
-  state.currentWave = { ...state.currentWave, kind: 'challenge', entries: [] };
-  state.nextSpawnIndex = 0;
-  state.baseHp = 300;
+test('endless starts from its fixed loadout and preserves resources between rounds', () => {
+  const state = createGame(18, { mode: 'endless' });
+  assert.equal(state.mode, 'endless');
+  assert.equal(state.chapterIndex, CHAPTERS.length);
+  assert.equal(state.levelIndex, null);
+  assert.equal(state.endlessRound, 1);
+  assert.equal(state.baseHp, state.maxBaseHp);
+  assert.equal(state.energy, ENDLESS_CHAPTER.startingEnergy);
+  assert.deepEqual(state.board, ENDLESS_CHAPTER.board);
+  assert.deepEqual(
+    state.operatorQueue.filter((item) => item.source === 'starter').map((item) => item.operatorId),
+    ENDLESS_CHAPTER.starterOperators,
+  );
+  assert.deepEqual(
+    state.formulaQueue.filter((item) => item.source === 'starter').map((item) => item.cardId),
+    ENDLESS_CHAPTER.starterFormulaIds,
+  );
+  assert.deepEqual(
+    state.constantQueue.filter((item) => item.source === 'starter').map((item) => item.value),
+    ENDLESS_CHAPTER.starterConstants,
+  );
+  assert.equal(state.towers.length, 0);
+  assert.equal(state.tutorialSnapshot, null);
+  assert.equal(state.enemyTutorialQueue.length, 0);
+  assert.equal(state.weaponTutorialQueue.length, 0);
+
+  startGame(state);
+  state.energy = 777;
   state.storedConstants = [{ id: 'endless-constant', value: Math.PI, source: 'k｜k=π' }];
   state.selectedStoredConstantId = 'endless-constant';
-  tick(state, 0.01);
-  assert.equal(state.chapterIndex, CHAPTERS.length);
-  assert.equal(state.endlessRound, 1);
-  assert.equal(state.energy, ENDLESS_CHAPTER.startingEnergy);
-  assert.equal(state.baseHp, 400);
-  assert.deepEqual(state.board, ENDLESS_CHAPTER.board);
-  assert.equal(state.storedConstants[0].value, Math.PI);
-  assert.equal(state.selectedStoredConstantId, 'endless-constant');
+  const persistentTower = configuredTower('derivative', undefined, {
+    id: 'endless-persistent-tower', row: 2, column: 3, hp: 88,
+  });
+  state.towers = [persistentTower];
+  state.operatorQueue.push({ id: 'endless-card', operatorId: 'derivative', source: 'random' });
 
-  const persistentTower = configuredTower('derivative');
-  state.towers.push(persistentTower);
-  state.energy = 777;
   state.phase = 'running';
   state.currentWave = { ...state.currentWave, entries: [] };
   state.nextSpawnIndex = 0;
@@ -450,6 +607,9 @@ test('entering endless resets once, then later rounds preserve the defense', () 
   assert.equal(state.prepDuration, 28);
   assert.equal(state.energy, 777);
   assert.equal(state.towers[0].id, persistentTower.id);
+  assert.equal(state.towers[0].hp, 88);
+  assert.equal(state.storedConstants[0].value, Math.PI);
+  assert.ok(state.operatorQueue.some((item) => item.id === 'endless-card'));
 });
 
 test('new parameter towers apply their mathematical operators', async (t) => {
@@ -473,6 +633,44 @@ test('new parameter towers apply their mathematical operators', async (t) => {
       assert.equal(state.enemies.length, 0);
     });
   }
+});
+
+test('f(k) substitutes x without silently setting y to zero', () => {
+  const state = createGame(24);
+  freezeSpawns(state);
+  state.towers = [];
+  const target = testEnemy(polynomial([term(1, 1, 2)]));
+  const tower = configuredTower('evaluateTower', 1);
+  state.enemies.push(target);
+  state.towers.push(tower);
+
+  tick(state, 0.01);
+  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.lane);
+  assert.equal(formatExpression(target.expression), 'y^2');
+});
+
+test('same-lane tower chains resolve from the forward column toward the core', () => {
+  const state = createGame(25);
+  freezeSpawns(state);
+  const target = testEnemy(logarithm(3), { speed: 0 });
+  // Deliberately store the towers in the opposite order from their positions.
+  // Board order, not deployment order, must make D transform ln|x| before Euler(1).
+  const rearEuler = configuredTower('eulerTower', 1, {
+    id: 'rear-euler', column: 0, position: 0.2,
+  });
+  const forwardDerivative = configuredTower('derivative', undefined, {
+    id: 'forward-derivative', column: 2, position: 0.4,
+  });
+  state.enemies = [target];
+  state.towers = [rearEuler, forwardDerivative];
+
+  tick(state, 0.01);
+  assert.deepEqual(
+    projectileEffects(state).map((effect) => effect.sourceTowerId),
+    ['forward-derivative', 'rear-euler'],
+  );
+  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.lane + 0.001);
+  assert.equal(state.enemies.length, 0);
 });
 
 test('every tower attack emits its own semantic projectile metadata', async (t) => {
@@ -553,6 +751,28 @@ test('every tower attack emits its own semantic projectile metadata', async (t) 
       });
     });
   }
+});
+
+test('an idle ready tower does not bank cooldown and burst-fire at the next target', () => {
+  const state = createGame(399);
+  freezeSpawns(state);
+  state.towers = [];
+  state.enemies = [];
+  state.effects = [];
+  const tower = configuredTower('derivative');
+  state.towers = [tower];
+
+  advanceBy(state, 5);
+  assert.equal(tower.cooldown, 0);
+
+  const target = testEnemy(polynomial([term(1, 5)]), { speed: 0 });
+  state.enemies = [target];
+  tick(state, 0.01);
+  assert.equal(projectileEffects(state).length, 1);
+
+  tick(state, 0.01);
+  assert.equal(projectileEffects(state).length, 1);
+  assert.ok(tower.cooldown > 1.7);
 });
 
 test('every single-target operator emits a falling semantic projectile', async (t) => {
@@ -702,7 +922,7 @@ test('concurrent projectiles recalculate against the expression at each impact',
   firstTower.cooldown = 999;
   secondTower.cooldown = 999;
 
-  advanceBy(state, 0.519);
+  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.lane - 0.001);
   assert.equal(formatExpression(target.expression), 'x^2');
   advanceBy(state, 0.002);
   assert.equal(formatExpression(target.expression), '2');
@@ -714,39 +934,111 @@ test('concurrent projectiles recalculate against the expression at each impact',
   assert.equal(state.logs.length, logsAfterImpacts);
 });
 
-test('a later projectile misses a target killed by an earlier impact without duplicate reward', () => {
+test('a later projectile finishes its route after an earlier impact kills the target', () => {
   const state = createGame(453);
-  state.chapterIndex = 5;
   freezeSpawns(state);
-  state.operatorQueue = [];
+  state.energyClock = -1000;
   state.effects = [];
-  const target = testEnemy(polynomial(7), { id: 'missed-target' });
-  const tower = configuredTower('derivative');
+  const target = testEnemy(polynomial(7), { id: 'missed-target', speed: 0 });
+  const firstTower = configuredTower('derivative', undefined, { id: 'tower-derivative-a' });
   state.enemies = [target];
-  state.towers = [tower];
+  state.towers = [firstTower];
 
   tick(state, 0.01);
   const [killingProjectile] = projectileEffects(state);
-  tower.cooldown = 999;
-  const reflectId = addArsenalCard(state, 'reflect');
-  assert.equal(selectArsenalItem(state, reflectId), true);
-  assert.equal(applyTargetOperator(state, target.id), true);
-  const laterProjectile = projectileEffects(state).find((effect) => effect.operatorId === 'reflect');
-  const energyAfterLaunch = state.energy;
+  firstTower.cooldown = 999;
 
-  advanceBy(state, killingProjectile.travelTime + 0.001);
+  advanceBy(state, killingProjectile.travelTime / 3);
+  const secondTower = configuredTower('derivative', undefined, {
+    id: 'tower-derivative-b', column: 1, position: 0.3,
+  });
+  state.towers.push(secondTower);
+  tick(state, Math.min(0.01, killingProjectile.travelTime / 100));
+  const laterProjectile = projectileEffects(state).find((effect) => (
+    effect.sourceTowerId === secondTower.id
+  ));
+  secondTower.cooldown = 999;
+  const energyAfterLaunch = state.energy;
+  const impactDelta = Math.min(0.001, killingProjectile.travelTime / 100);
+
+  advanceBy(state, killingProjectile.impactIn + impactDelta);
   assert.equal(state.kills, 1);
   assert.equal(state.energy, energyAfterLaunch + target.reward);
   assert.equal(killingProjectile.status, 'impacted');
+  assert.equal(state.enemies.length, 0);
+  assert.equal(state.effects.includes(laterProjectile), true);
+  assert.equal(laterProjectile.status, 'flying');
+  assert.equal(laterProjectile.impactResolved, false);
+  assert.equal(laterProjectile.missed, false);
+  assert.ok(laterProjectile.progress > 0 && laterProjectile.progress < 1);
+
+  const remainingFlight = laterProjectile.impactIn;
+  const missDelta = Math.min(0.001, remainingFlight / 100);
+  advanceBy(state, remainingFlight - missDelta);
+  assert.equal(state.effects.includes(laterProjectile), true);
+  assert.equal(laterProjectile.status, 'flying');
+  advanceBy(state, missDelta * 2);
   assert.equal(laterProjectile.status, 'missed');
   assert.equal(laterProjectile.impactResolved, true);
   assert.equal(laterProjectile.missed, true);
+  assert.equal(laterProjectile.progress, 1);
+  assert.equal(state.effects.includes(laterProjectile), true);
 
   const logsAfterMiss = state.logs.length;
-  advanceBy(state, 0.2);
+  advanceBy(state, laterProjectile.ttl + missDelta);
+  assert.equal(state.effects.includes(laterProjectile), false);
   assert.equal(state.kills, 1);
   assert.equal(state.energy, energyAfterLaunch + target.reward);
   assert.equal(state.logs.length, logsAfterMiss);
+});
+
+test('the final enemy waits for an orphaned projectile before advancing the wave', () => {
+  const state = createGame(459);
+  state.chapterIndex = CHAPTERS.length;
+  state.endlessRound = 1;
+  state.phase = 'running';
+  state.currentWave = { ...state.currentWave, kind: 'challenge', entries: [] };
+  state.nextSpawnIndex = 0;
+  state.effects = [];
+  const target = testEnemy(polynomial(7), { id: 'last-orphan-target', speed: 0, reward: 0 });
+  const firstTower = configuredTower('derivative', undefined, { id: 'last-shot-a' });
+  const secondTower = configuredTower('derivative', undefined, {
+    id: 'last-shot-b', column: 1, position: 0.3,
+  });
+  state.enemies = [target];
+  state.towers = [firstTower, secondTower];
+
+  tick(state, 0.01);
+  const [killingProjectile, laterProjectile] = projectileEffects(state);
+  firstTower.cooldown = 999;
+  secondTower.cooldown = 999;
+  const linger = GAMEPLAY_CONFIG.effects.projectileImpactLingerSeconds;
+  laterProjectile.impactIn = killingProjectile.impactIn + linger + 0.2;
+  laterProjectile.travelTime = laterProjectile.impactIn;
+  laterProjectile.ttl = laterProjectile.impactIn + linger;
+
+  advanceBy(state, killingProjectile.impactIn + 0.001);
+  assert.equal(state.kills, 1);
+  assert.equal(killingProjectile.status, 'impacted');
+  assert.equal(laterProjectile.status, 'flying');
+  assert.equal(state.phase, 'running');
+  assert.equal(state.endlessRound, 1);
+
+  advanceBy(state, killingProjectile.ttl + 0.001);
+  assert.equal(state.effects.includes(killingProjectile), false);
+  assert.equal(state.effects.includes(laterProjectile), true);
+  assert.equal(laterProjectile.status, 'flying');
+  assert.equal(state.phase, 'running');
+  assert.equal(state.endlessRound, 1);
+
+  advanceBy(state, laterProjectile.impactIn + 0.001);
+  assert.equal(laterProjectile.status, 'missed');
+  assert.equal(state.effects.includes(laterProjectile), true);
+  assert.equal(state.phase, 'running');
+
+  advanceBy(state, laterProjectile.ttl + 0.001);
+  assert.equal(state.phase, 'preparing');
+  assert.equal(state.endlessRound, 2);
 });
 
 test('a due projectile misses an enemy at the base before its body damage leaks', () => {
@@ -779,6 +1071,8 @@ test('a due projectile misses an enemy at the base before its body damage leaks'
   assert.equal(projectile.status, 'missed');
   assert.equal(projectile.impactResolved, true);
   assert.equal(projectile.missed, true);
+  assert.equal(state.effects.includes(projectile), true);
+  assert.ok(projectile.ttl > 0);
   assert.equal(formatExpression(target.expression), '12');
   assert.equal(formatExpression(target.shieldExpression), 'x');
   assert.equal(state.baseHp, baseHpBefore - 12);
@@ -788,7 +1082,7 @@ test('a due projectile misses an enemy at the base before its body damage leaks'
   assert.equal(state.effects.filter((effect) => effect.type === 'base-damage').length, 1);
 });
 
-test('an enemy reaching the base earlier in the same frame makes its projectile miss', () => {
+test('an enemy reaching the base earlier lets its projectile finish as a miss', () => {
   const state = createGame(457);
   state.chapterIndex = 5;
   freezeSpawns(state);
@@ -803,20 +1097,29 @@ test('an enemy reaching the base earlier in the same frame makes its projectile 
   assert.equal(selectArsenalItem(state, reflectId), true);
   assert.equal(applyTargetOperator(state, target.id), true);
   const [projectile] = projectileEffects(state);
-  projectile.impactIn = 0.2;
+  projectile.travelTime = 0.4;
+  projectile.impactIn = 0.4;
+  projectile.ttl = 0.4 + GAMEPLAY_CONFIG.effects.projectileImpactLingerSeconds;
   const baseHpBefore = state.baseHp;
   const energyAfterLaunch = state.energy;
 
   tick(state, 0.2);
 
-  assert.equal(projectile.status, 'missed');
-  assert.equal(projectile.impactResolved, true);
-  assert.equal(projectile.missed, true);
+  assert.equal(projectile.status, 'flying');
+  assert.equal(projectile.impactResolved, false);
+  assert.equal(projectile.missed, false);
+  assert.equal(state.effects.includes(projectile), true);
   assert.equal(formatExpression(target.expression), '12');
   assert.equal(state.baseHp, baseHpBefore - 12);
   assert.equal(state.enemies.length, 0);
   assert.equal(state.kills, 0);
   assert.equal(state.energy, energyAfterLaunch);
+
+  advanceBy(state, projectile.impactIn + 0.001);
+  assert.equal(projectile.status, 'missed');
+  assert.equal(projectile.impactResolved, true);
+  assert.equal(projectile.missed, true);
+  assert.equal(state.effects.includes(projectile), true);
 });
 
 test('a projectile arriving before the base crossing in the same frame hits first', () => {
@@ -977,13 +1280,13 @@ test('global partial differentiation hits each live enemy at its staggered impac
     assert.equal(effect.from, undefined);
   }
   assert.equal(projectiles[0].delay, 0);
-  assert.equal(projectiles[0].impactIn, 0.56);
+  assert.equal(projectiles[0].impactIn, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop);
   assert.equal(projectiles[1].delay, 0.035);
-  assert.ok(Math.abs(projectiles[1].impactIn - 0.595) < 1e-12);
+  assert.ok(Math.abs(projectiles[1].impactIn - (GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop + 0.035)) < 1e-12);
   assert.equal(formatExpression(state.enemies[0].expression), 'x^2');
   assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
 
-  advanceBy(state, 0.559);
+  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop - 0.001);
   assert.equal(formatExpression(state.enemies[0].expression), 'x^2');
   assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
   assert.equal(projectiles[0].status, 'flying');
@@ -1075,6 +1378,8 @@ test('tower hits transform a shield to zero before the next hit reaches the body
     tower.cooldown = 0;
     tick(state, 0.01);
     const projectile = projectileEffects(state).find((effect) => !effect.impactResolved);
+    tower.cooldown = 999;
+    target.speed = 0;
     assert.ok(projectile);
     if (resolve) resolve(projectile);
     else advanceBy(state, projectile.impactIn + 0.001);
@@ -1275,6 +1580,7 @@ test('Euler tower compatibility follows the shield before the hidden body', () =
   tick(state, 0.01);
   assert.equal(formatExpression(target.shieldExpression), 'x^-1');
   const [projectile] = projectileEffects(state);
+  tower.cooldown = 999;
   advanceBy(state, projectile.impactIn + 0.001);
   assert.equal(target.shieldExpression, null);
   assert.equal(formatExpression(target.expression), 'e^x');

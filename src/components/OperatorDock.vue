@@ -26,7 +26,7 @@ const selectionHint = computed(() => {
   if (operator?.kind === 'tower') return `${operator.name}：點擊發亮格子部署`;
   if (props.state.targetingOperator) return `${operator?.name ?? '單體算子'}：點擊一隻敵人`;
   if (props.state.partialConfirmOpen) return '確認全場算式變化後施放';
-  return '數字鍵 1–8 選牌；使用成功才會消耗';
+  return `數字鍵 1–${OPERATOR_QUEUE_CAPACITY} 選牌；使用成功才會消耗`;
 });
 
 function usage(operator) {
@@ -69,7 +69,8 @@ function isSelected(item) {
         :title="item.operator.description"
         @click="$emit('select', item.id)"
       >
-        <span class="operator-key">{{ item.index + 1 }}</span>
+        <span class="operator-key">{{ item.index < OPERATOR_QUEUE_CAPACITY ? item.index + 1 : '·' }}</span>
+        <span v-if="item.source === 'guaranteed'" class="guaranteed-card-badge">保障</span>
         <span class="operator-art" :class="item.operator.art" aria-hidden="true"></span>
         <span class="operator-copy">
           <span class="operator-name"><b>{{ item.operator.symbol }}</b> {{ item.operator.name }}</span>

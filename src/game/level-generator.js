@@ -8,19 +8,11 @@ import {
   polynomial,
   trigonometric,
 } from '../domain/expression.js';
+import { GENERATION_CONFIG } from '../config/generation.js';
 import { CHAPTERS, ENDLESS_CHAPTER } from './content.js';
+import { finiteEncounterSchedule, finiteLaneRoles } from './encounters.js';
 
 const UINT32_RANGE = 0x1_0000_0000;
-const FAMILY_META = Object.freeze({
-  polynomial: { label: '多項式', name: '次方墨兔', art: 'enemy-art-polynomial', speed: 0.020, reward: 28 },
-  constant: { label: '常數項', name: '常數背包獸', art: 'enemy-art-polynomial', speed: 0.0165, reward: 40 },
-  higherOrder: { label: '高階多項式', name: '階乘巨獸', art: 'enemy-art-brute', speed: 0.0115, reward: 62 },
-  multivariable: { label: '多變數', name: '雙變數紙獸', art: 'enemy-art-wave', speed: 0.014, reward: 68 },
-  rational: { label: '分式', name: '漸近潛獸', art: 'enemy-art-wave', speed: 0.017, reward: 74 },
-  logarithmic: { label: '對數', name: '對數捲獸', art: 'enemy-art-brute', speed: 0.0135, reward: 84 },
-  trigonometric: { label: '三角函數', name: '週期浪獸', art: 'enemy-art-wave', speed: 0.016, reward: 94 },
-  exponential: { label: '指數函數', name: '指數飛蛾', art: 'enemy-art-exponential', speed: 0.0135, reward: 110 },
-});
 
 function seedText(seed) {
   if (typeof seed === 'number' && Number.isFinite(seed)) return String(seed >>> 0);
@@ -69,9 +61,9 @@ function shuffle(rng, values) {
   return result;
 }
 
-function nonZeroCoefficient(rng, maximum = 4) {
+function nonZeroCoefficient(rng, maximum = GENERATION_CONFIG.expressions.coefficient.defaultMaximum) {
   const magnitude = integer(rng, 1, maximum);
-  return chance(rng, 0.25) ? -magnitude : magnitude;
+  return chance(rng, GENERATION_CONFIG.expressions.coefficient.negativeChance) ? -magnitude : magnitude;
 }
 
 function uniqueIntegers(rng, count, minimum, maximum) {
@@ -79,86 +71,40 @@ function uniqueIntegers(rng, count, minimum, maximum) {
   return shuffle(rng, pool).slice(0, Math.min(count, pool.length));
 }
 
-function makePolynomial(rng, maxPower, maxItems, minimumPower = 1) {
-  const count = integer(rng, 1, Math.min(maxItems, Math.max(1, maxPower - minimumPower + 1)));
-  const powers = uniqueIntegers(rng, count, minimumPower, maxPower);
-  return polynomial(powers.map((xPower) => ({ coefficient: nonZeroCoefficient(rng), xPower, yPower: 0 })));
-}
-
-function makeConstantExpression(rng, maxPower, maxItems) {
-  const variableItems = Math.max(1, Math.min(maxItems - 1, integer(rng, 1, 2)));
-  const variable = makePolynomial(rng, Math.max(1, maxPower), variableItems);
-  const constant = polynomial([{ coefficient: nonZeroCoefficient(rng, 6), xPower: 0, yPower: 0 }]);
-  return addExpressions(variable, constant);
-}
-
-function makeHigherOrder(rng, maxPower, maxItems) {
-  const upper = Math.max(3, maxPower);
-  const count = integer(rng, 1, Math.min(maxItems, upper - 2));
-  const powers = uniqueIntegers(rng, count, 3, upper);
-  return polynomial(powers.map((xPower) => ({ coefficient: nonZeroCoefficient(rng, 3), xPower, yPower: 0 })));
-}
-
-function makeMultivariable(rng, maxPower, maxItems) {
-  const count = integer(rng, 1, Math.min(3, maxItems));
-  const terms = [];
-  const used = new Set();
-  while (terms.length < count) {
-    const xPower = integer(rng, 0, Math.min(3, maxPower));
-    const yPower = integer(rng, 1, Math.min(4, maxPower));
-    const key = `${xPower}:${yPower}`;
-    if (used.has(key)) continue;
-    used.add(key);
-    terms.push({ coefficient: nonZeroCoefficient(rng, 3), xPower, yPower });
-  }
-  return polynomial(terms);
-}
-
-function makeRational(rng, maxItems) {
-  const count = integer(rng, 1, Math.min(4, maxItems));
-  const powers = uniqueIntegers(rng, count, -4, -1);
-  return polynomial(powers.map((xPower) => ({ coefficient: nonZeroCoefficient(rng, 4), xPower, yPower: 0 })));
-}
-
-function makeLogarithmic(rng, maxItems) {
-  // p=-1 would integrate to (ln|x|)^2/2, which is deliberately outside the
-  // game's finite basis. Keep generated logarithms closed under our operators.
-  const count = integer(rng, 1, Math.min(2, maxItems));
-  const powers = uniqueIntegers(rng, count, 0, 1);
-  return addExpressions(...powers.map((xPower) => logarithm(nonZeroCoefficient(rng, 3), xPower)));
-}
-
-function makeTrigonometric(rng, maxFrequency, maxItems) {
-  const available = [];
-  for (let rate = 1; rate <= maxFrequency; rate += 1) {
-    available.push(['sin', rate], ['cos', rate]);
-  }
-  const count = integer(rng, 1, Math.min(maxItems, available.length));
-  return addExpressions(...shuffle(rng, available).slice(0, count).map(([kind, rate]) => (
-    trigonometric(kind, rate, nonZeroCoefficient(rng, 3))
-  )));
-}
-
-function makeExponential(rng, maxFrequency, maxItems) {
-  const count = integer(rng, 1, Math.min(maxItems, maxFrequency));
-  const rates = uniqueIntegers(rng, count, 1, maxFrequency);
-  return addExpressions(...rates.map((rate) => exponential(
-    chance(rng, 0.18) ? -rate : rate,
-    nonZeroCoefficient(rng, 3),
-  )));
-}
-
-function createExpression(rng, family, limits) {
-  switch (family) {
-    case 'polynomial': return makePolynomial(rng, limits.maxPower, limits.maxItems);
-    case 'constant': return makeConstantExpression(rng, limits.maxPower, limits.maxItems);
-    case 'higherOrder': return makeHigherOrder(rng, limits.maxPower, limits.maxItems);
-    case 'multivariable': return makeMultivariable(rng, limits.maxPower, limits.maxItems);
-    case 'rational': return makeRational(rng, limits.maxItems);
-    case 'logarithmic': return makeLogarithmic(rng, limits.maxItems);
-    case 'trigonometric': return makeTrigonometric(rng, limits.maxFrequency, limits.maxItems);
-    case 'exponential': return makeExponential(rng, limits.maxFrequency, limits.maxItems);
-    default: throw new RangeError(`unknown expression family: ${family}`);
+function finiteExpression(rng, role) {
+  const config = GENERATION_CONFIG.expressions;
+  const power = role.powerRange ? integer(rng, role.powerRange[0], role.powerRange[1]) : null;
+  switch (role.family) {
+    case 'constant':
+      return polynomial([{ coefficient: nonZeroCoefficient(rng, config.constant.coefficientMaximum), xPower: 0, yPower: 0 }]);
+    case 'polynomial':
+      return polynomial([{ coefficient: nonZeroCoefficient(rng), xPower: power, yPower: 0 }]);
+    case 'higherOrder':
+      return polynomial([{ coefficient: nonZeroCoefficient(rng, config.higherOrder.coefficientMaximum), xPower: power, yPower: 0 }]);
+    case 'multivariable':
+      return polynomial([{
+        coefficient: nonZeroCoefficient(rng, config.multivariable.coefficientMaximum),
+        xPower: power,
+        yPower: integer(rng, role.yPowerRange[0], role.yPowerRange[1]),
+      }]);
+    case 'rational':
+      return polynomial([{ coefficient: nonZeroCoefficient(rng, config.rational.coefficientMaximum), xPower: power, yPower: 0 }]);
+    case 'logarithmic':
+      return logarithm(nonZeroCoefficient(rng, config.logarithmic.coefficientMaximum));
+    case 'trigonometric': {
+      const coefficient = () => nonZeroCoefficient(rng, config.trigonometric.coefficientMaximum);
+      if (role.form === 'mixed') {
+        return addExpressions(
+          trigonometric('sin', role.frequency, coefficient()),
+          trigonometric('cos', role.frequency, coefficient()),
+        );
+      }
+      return trigonometric(chance(rng, 0.5) ? 'sin' : 'cos', role.frequency, coefficient());
+    }
+    case 'exponential':
+      return exponential(role.rate, nonZeroCoefficient(rng, config.exponential.coefficientMaximum));
+    default:
+      throw new RangeError(`unknown finite expression family: ${role.family}`);
   }
 }
 
@@ -166,32 +112,10 @@ function basisExpressions(expression) {
   const normalized = normalizeExpression(expression);
   return [
     ...normalized.terms.map((term) => polynomial([term])),
-    ...(normalized.exponentials ?? []).map((term) => exponential(term.rate, term.coefficient)),
-    ...(normalized.trigTerms ?? []).map((term) => trigonometric(term.kind, term.rate, term.coefficient)),
-    ...(normalized.logTerms ?? []).map((term) => logarithm(term.coefficient, term.xPower)),
+    ...normalized.exponentials.map((term) => exponential(term.rate, term.coefficient)),
+    ...normalized.trigTerms.map((term) => trigonometric(term.kind, term.rate, term.coefficient)),
+    ...normalized.logTerms.map((term) => logarithm(term.coefficient, term.xPower)),
   ];
-}
-
-function selectFiniteAffixes(rng, chapterIndex, maySplit) {
-  const mutationChance = [0.12, 0.16, 0.2, 0.25, 0.3, 0.36][chapterIndex];
-  if (!chance(rng, mutationChance)) return [];
-  const choices = ['fast'];
-  if (chapterIndex >= 3) choices.push('shield');
-  if (chapterIndex >= 4 && maySplit) choices.push('split');
-  return [pick(rng, choices)];
-}
-
-function selectEndlessAffixes(rng, roundNumber, maySplit) {
-  if (!chance(rng, Math.min(0.72, 0.25 + roundNumber * 0.025))) return [];
-  const choices = ['fast', 'shield', ...(maySplit ? ['split'] : [])];
-  const first = pick(rng, choices);
-  const affixes = [first];
-  if (roundNumber < 8 || !chance(rng, Math.min(0.48, 0.1 + (roundNumber - 8) * 0.018))) return affixes;
-
-  // The only legal double combinations are fast+shield and fast+split.
-  if (first === 'fast') affixes.push(pick(rng, maySplit ? ['shield', 'split'] : ['shield']));
-  else affixes.unshift('fast');
-  return affixes;
 }
 
 function splitChildren(expression, hasSplit) {
@@ -200,143 +124,398 @@ function splitChildren(expression, hasSplit) {
   return basis.length === 2 ? basis.map(cloneExpression) : [];
 }
 
-function balancedRows(rng, count, rows) {
-  const result = [];
-  while (result.length < count) {
-    result.push(...shuffle(rng, Array.from({ length: rows }, (_, row) => row)));
-  }
-  return result.slice(0, count);
+function selectFiniteAffixes(rng, role) {
+  const choices = role.possibleAffixes ?? [];
+  if (choices.length === 0 || !chance(rng, GENERATION_CONFIG.finite.affixChance)) return [];
+  return [pick(rng, choices)];
 }
 
-function familySchedule(rng, families, count) {
-  const scheduled = [...families];
-  while (scheduled.length < count) scheduled.push(pick(rng, families));
-  return shuffle(rng, scheduled.slice(0, count));
+function counterRequirement(role) {
+  const parameters = role.counter.parameters ?? [];
+  return {
+    row: role.row,
+    family: role.family,
+    operators: role.counter.operatorIds.map((operatorId, index) => ({
+      operatorId,
+      ...(parameters[index] == null ? {} : { parameter: parameters[index] }),
+    })),
+  };
+}
+
+function parameterMaterials(operatorId, parameter) {
+  if (operatorId === 'resonanceTower' && parameter > 0 && Number.isInteger(Math.sqrt(parameter))) {
+    return { formulaId: 'kSquared', constant: Math.sqrt(parameter) };
+  }
+  if (operatorId === 'resonanceTower' && parameter < 0 && Number.isInteger(Math.sqrt(-parameter))) {
+    return { formulaId: 'negSquareK', constant: Math.sqrt(-parameter) };
+  }
+  return { formulaId: 'identityK', constant: parameter };
+}
+
+function guaranteeForRequirements(requirements) {
+  const guaranteedSupply = { operators: [], formulaIds: [], constants: [] };
+  for (const requirement of requirements) {
+    for (const operator of requirement.operators) {
+      guaranteedSupply.operators.push(operator.operatorId);
+      if (operator.parameter == null) continue;
+      const materials = parameterMaterials(operator.operatorId, operator.parameter);
+      guaranteedSupply.formulaIds.push(materials.formulaId);
+      guaranteedSupply.constants.push(materials.constant);
+    }
+  }
+  return guaranteedSupply;
 }
 
 function dangerLabel(wave) {
+  const config = GENERATION_CONFIG.danger;
   const mutationCount = wave.entries.reduce((total, entry) => total + entry.affixes.length, 0);
   const averageDamage = wave.entries.reduce((total, entry) => total + damage(entry.expression), 0) / wave.entries.length;
-  const score = wave.entries.length + mutationCount * 1.5 + averageDamage * 0.22;
-  if (score < 11) return '低';
-  if (score < 18) return '中';
-  if (score < 27) return '高';
-  return '極高';
+  const score = wave.entries.length * config.enemyCountWeight
+    + mutationCount * config.mutationWeight
+    + averageDamage * config.averageDamageWeight;
+  return config.tiers.find((tier) => score < tier.maximumExclusive)?.label ?? config.maximumLabel;
+}
+
+function expressionRanges(entries) {
+  const powers = [];
+  const frequencies = [];
+  let mixedFrequencyElite = false;
+  for (const entry of entries) {
+    const expression = normalizeExpression(entry.expression);
+    powers.push(...expression.terms.map((term) => term.xPower));
+    powers.push(...expression.logTerms.map((term) => term.xPower));
+    const entryRates = [
+      ...expression.exponentials.map((term) => term.rate),
+      ...expression.trigTerms.map((term) => term.rate),
+    ];
+    frequencies.push(...entryRates);
+    if (new Set(entryRates).size > 1) mixedFrequencyElite = true;
+  }
+  return {
+    ...(powers.length ? { powerRange: [Math.min(...powers), Math.max(...powers)] } : {}),
+    ...(frequencies.length ? { frequencyRange: [Math.min(...frequencies), Math.max(...frequencies)] } : {}),
+    ...(mixedFrequencyElite ? { mixedFrequencyElite: true } : {}),
+  };
 }
 
 export function summarizeWave(wave) {
   const counts = new Map();
+  const byLane = new Map();
   let mutationCount = 0;
   for (const entry of wave.entries) {
     counts.set(entry.family, (counts.get(entry.family) ?? 0) + 1);
     mutationCount += entry.affixes.length;
+    if (!byLane.has(entry.row)) byLane.set(entry.row, []);
+    byLane.get(entry.row).push(entry);
   }
   return {
     total: wave.entries.length,
-    families: [...counts.entries()].map(([id, count]) => ({ id, label: FAMILY_META[id].label, count })),
+    families: [...counts.entries()].map(([id, count]) => ({
+      id,
+      label: GENERATION_CONFIG.families[id].label,
+      count,
+    })),
     mutationCount,
     danger: dangerLabel(wave),
+    lanes: [...byLane.entries()].sort(([left], [right]) => left - right).map(([row, entries]) => {
+      const families = [...new Set(entries.map((entry) => entry.family))];
+      return {
+        row,
+        family: families.length === 1 ? families[0] : 'mixed',
+        families,
+        ...expressionRanges(entries),
+        possibleAffixes: [...new Set(entries.flatMap((entry) => entry.possibleAffixes ?? entry.affixes))].sort(),
+      };
+    }),
   };
 }
 
-function generateWave({ seed, chapter, chapterIndex, endlessRound = 0, count, limits, speedScale }) {
-  const streamName = endlessRound > 0 ? `endless-${endlessRound}` : `chapter-${chapterIndex}`;
-  const rng = createSeededRng(seed, 'level', streamName);
-  const rows = balancedRows(rng, count, chapter.board.rows);
-  const families = familySchedule(rng, chapter.families, count);
-  const entries = [];
-  let spawnAt = 0;
+function finiteEntry(seed, streamName, index, event, role, rng, chapterIndex) {
+  const expression = finiteExpression(rng, role);
+  const affixes = selectFiniteAffixes(rng, role);
+  const meta = GENERATION_CONFIG.families[role.family];
+  const rewardConfig = GENERATION_CONFIG.rewards;
+  const hasFast = affixes.includes('fast');
+  const hasShield = affixes.includes('shield');
+  return {
+    id: `${streamName}-${mixSeed(seed, streamName, index).toString(16)}`,
+    spawnAt: round(event.spawnAt, GENERATION_CONFIG.spawn.timePrecision),
+    row: event.row,
+    typeId: `procedural-${role.family}`,
+    name: meta.name,
+    art: meta.art,
+    family: role.family,
+    expression: cloneExpression(expression),
+    speed: round(
+      meta.speed * (GENERATION_CONFIG.finite.speed.baseMultiplier
+        + chapterIndex * GENERATION_CONFIG.finite.speed.perChapter),
+      GENERATION_CONFIG.output.speedPrecision,
+    ),
+    reward: Math.ceil(
+      meta.reward
+      * (rewardConfig.finite.baseMultiplier + chapterIndex * rewardConfig.finite.perChapter)
+      * (hasFast ? rewardConfig.affixMultipliers.fast : 1)
+      * (hasShield ? rewardConfig.affixMultipliers.shield : 1),
+    ),
+    affixes,
+    splitExpressions: splitChildren(expression, affixes.includes('split')),
+    possibleAffixes: [...(role.possibleAffixes ?? [])],
+  };
+}
 
-  for (let index = 0; index < count; index += 1) {
-    const family = families[index];
-    const meta = FAMILY_META[family];
-    const expression = createExpression(rng, family, limits);
-    const basis = basisExpressions(expression);
-    const affixes = endlessRound > 0
-      ? selectEndlessAffixes(rng, endlessRound, basis.length === 2)
-      : selectFiniteAffixes(rng, chapterIndex, basis.length === 2);
-    const hasFast = affixes.includes('fast');
-    const hasShield = affixes.includes('shield');
-    const rewardScale = endlessRound > 0 ? 1 + Math.min(1.5, endlessRound * 0.045) : 1 + chapterIndex * 0.06;
-    const splitExpressions = splitChildren(expression, affixes.includes('split'));
-
-    entries.push({
-      id: `${streamName}-${mixSeed(seed, streamName, index).toString(16)}`,
-      spawnAt: round(spawnAt, 3),
-      row: rows[index],
-      typeId: `procedural-${family}`,
-      name: meta.name,
-      art: meta.art,
-      family,
-      expression: cloneExpression(expression),
-      // Affix modifiers are applied by the engine so each multiplier has one
-      // authoritative owner. This value contains only chapter/round scaling.
-      speed: round(meta.speed * speedScale, 6),
-      reward: Math.ceil(meta.reward * rewardScale * (hasFast ? 1.2 : 1) * (hasShield ? 1.25 : 1)),
-      affixes,
-      splitExpressions,
-    });
-    spawnAt += chapter.spawnInterval * (0.86 + rng() * 0.28);
+export function generateFiniteSegment(seed, chapterIndex, segmentIndex) {
+  if (!Number.isInteger(chapterIndex) || chapterIndex < 0 || chapterIndex >= CHAPTERS.length) {
+    throw new RangeError(`chapterIndex must be between 0 and ${CHAPTERS.length - 1}`);
   }
-
+  if (segmentIndex !== 1 && segmentIndex !== 2) {
+    throw new RangeError('segmentIndex must be 1 (pressure) or 2 (mixed)');
+  }
+  const chapter = CHAPTERS[chapterIndex];
+  const segment = chapter.segments[segmentIndex - 1];
+  const streamName = `chapter-${chapterIndex}-segment-${segmentIndex}`;
+  const countRng = createSeededRng(seed, 'level', streamName, 'count');
+  const count = integer(countRng, segment.countRange[0], segment.countRange[1]);
+  const schedule = finiteEncounterSchedule(
+    createSeededRng(seed, 'level', streamName, 'schedule'),
+    count,
+    chapter.board.rows,
+    segment.kind,
+  );
+  const roles = finiteLaneRoles(
+    createSeededRng(seed, 'level', streamName, 'roles'),
+    chapterIndex,
+    segment.kind,
+    schedule.map((event) => event.row),
+  );
+  const rolesByRow = new Map(roles.map((role) => [role.row, role]));
+  const expressionRng = createSeededRng(seed, 'level', streamName, 'expressions');
+  const entries = schedule.map((event, index) => finiteEntry(
+    seed, streamName, index, event, rolesByRow.get(event.row), expressionRng, chapterIndex,
+  ));
+  const counterRequirements = roles.map(counterRequirement);
   const wave = {
-    id: endlessRound > 0 ? `endless-${endlessRound}` : chapter.id,
-    kind: endlessRound > 0 ? 'endless' : 'challenge',
-    name: endlessRound > 0 ? `無限證明 ${endlessRound}` : chapter.name,
+    id: `${chapter.id}-${segment.kind}`,
+    kind: 'challenge',
+    name: `${chapter.name}・${segment.kind === 'pressure' ? '壓力段' : '混合段'}`,
     hint: chapter.hint,
     theme: chapter.theme,
     chapterIndex,
-    endlessRound,
+    endlessRound: 0,
+    segmentIndex,
+    segmentKind: segment.kind,
+    awardsEarlyStart: segmentIndex === 1,
     entries,
     requiredTags: [...new Set(entries.map((entry) => entry.family))],
+    counterRequirements,
+    guaranteedSupply: guaranteeForRequirements(counterRequirements),
   };
   wave.summary = summarizeWave(wave);
   return wave;
 }
 
-export function generateFiniteWave(seed, chapterIndex) {
-  if (!Number.isInteger(chapterIndex) || chapterIndex < 0 || chapterIndex >= CHAPTERS.length) {
-    throw new RangeError(`chapterIndex must be between 0 and ${CHAPTERS.length - 1}`);
-  }
-  const chapter = CHAPTERS[chapterIndex];
-  const countRng = createSeededRng(seed, 'level', `chapter-${chapterIndex}`, 'count');
-  const count = integer(countRng, chapter.countRange[0], chapter.countRange[1]);
-  return generateWave({
-    seed,
-    chapter,
-    chapterIndex,
-    count,
-    limits: { maxItems: 4, maxPower: Math.min(6, 3 + chapterIndex), maxFrequency: 2 },
-    speedScale: 1 + chapterIndex * 0.035,
-  });
+/** Compatibility wrapper; omitted segmentIndex means the first formal segment. */
+export function generateFiniteWave(seed, chapterIndex, segmentIndex = 1) {
+  return generateFiniteSegment(seed, chapterIndex, segmentIndex);
+}
+
+function applyEndlessIncrement(state, axis, config) {
+  if (state[axis] >= config.maximum) return false;
+  state[axis] = Math.min(config.maximum, state[axis] + config.amount);
+  return true;
 }
 
 export function endlessDifficulty(roundNumber) {
   if (!Number.isInteger(roundNumber) || roundNumber < 1) {
     throw new RangeError('endless round must be a positive integer');
   }
-  return {
-    count: Math.min(14 + 2 * (roundNumber - 1), 36),
-    maxItems: Math.min(5, 2 + Math.floor(roundNumber / 5)),
-    maxPower: Math.min(8, 6 + Math.floor(roundNumber / 4)),
-    maxFrequency: Math.min(3, 2 + Math.floor(roundNumber / 6)),
-    speedMultiplier: Math.min(1.75, 1 + (roundNumber - 1) * 0.055),
-  };
+  const config = GENERATION_CONFIG.endless;
+  const state = { ...config.baseline, allowedAffixes: [...config.baseline.allowedAffixes] };
+  let introducedAxis = 'baseline';
+  for (const introduction of config.introductions) {
+    if (introduction.round > roundNumber) break;
+    Object.assign(state, introduction.patch ?? {});
+    if (introduction.addAffix && !state.allowedAffixes.includes(introduction.addAffix)) {
+      state.allowedAffixes.push(introduction.addAffix);
+    }
+    if (introduction.round === roundNumber) introducedAxis = introduction.axis;
+  }
+
+  let rotationCursor = 0;
+  for (let currentRound = 12; currentRound <= roundNumber; currentRound += 1) {
+    let appliedAxis = null;
+    for (let attempt = 0; attempt < config.rotation.length; attempt += 1) {
+      const index = (rotationCursor + attempt) % config.rotation.length;
+      const axis = config.rotation[index];
+      if (!applyEndlessIncrement(state, axis, config.increments[axis])) continue;
+      rotationCursor = (index + 1) % config.rotation.length;
+      appliedAxis = axis;
+      break;
+    }
+    if (currentRound === roundNumber) introducedAxis = appliedAxis ?? 'capped';
+  }
+  return { ...state, stageAxis: introducedAxis };
+}
+
+function endlessExpression(rng, family, difficulty) {
+  const config = GENERATION_CONFIG.expressions;
+  switch (family) {
+    case 'constant':
+      return polynomial([{ coefficient: nonZeroCoefficient(rng, config.constant.coefficientMaximum), xPower: 0, yPower: 0 }]);
+    case 'polynomial': {
+      const count = integer(rng, 1, Math.min(difficulty.maxItems, difficulty.maxPower));
+      return polynomial(uniqueIntegers(rng, count, 1, difficulty.maxPower).map((xPower) => ({
+        coefficient: nonZeroCoefficient(rng), xPower, yPower: 0,
+      })));
+    }
+    case 'higherOrder': {
+      const count = integer(rng, 1, Math.min(difficulty.maxItems, Math.max(1, difficulty.maxPower - 2)));
+      return polynomial(uniqueIntegers(rng, count, 3, Math.max(3, difficulty.maxPower)).map((xPower) => ({
+        coefficient: nonZeroCoefficient(rng, config.higherOrder.coefficientMaximum), xPower, yPower: 0,
+      })));
+    }
+    case 'multivariable': {
+      const count = integer(rng, 1, Math.min(difficulty.maxItems, Math.max(1, difficulty.maxPower - 2)));
+      return polynomial(uniqueIntegers(rng, count, 3, Math.max(3, difficulty.maxPower)).map((xPower) => ({
+        coefficient: nonZeroCoefficient(rng, config.multivariable.coefficientMaximum),
+        xPower,
+        yPower: integer(rng, config.multivariable.yPower.minimum, config.multivariable.yPower.maximum),
+      })));
+    }
+    case 'rational':
+      return polynomial([{ coefficient: nonZeroCoefficient(rng, config.rational.coefficientMaximum), xPower: pick(rng, config.rational.powers), yPower: 0 }]);
+    case 'logarithmic':
+      return logarithm(nonZeroCoefficient(rng, config.logarithmic.coefficientMaximum));
+    case 'trigonometric': {
+      const frequency = pick(rng, config.trigonometric.frequencies);
+      const first = trigonometric(chance(rng, 0.5) ? 'sin' : 'cos', frequency, nonZeroCoefficient(rng, config.trigonometric.coefficientMaximum));
+      if (difficulty.maxItems < 2 || !chance(rng, 0.45)) return first;
+      const secondKind = first.trigTerms[0].kind === 'sin' ? 'cos' : 'sin';
+      return addExpressions(first, trigonometric(secondKind, frequency, nonZeroCoefficient(rng, config.trigonometric.coefficientMaximum)));
+    }
+    case 'exponential':
+      return exponential(pick(rng, config.exponential.rates), nonZeroCoefficient(rng, config.exponential.coefficientMaximum));
+    default:
+      throw new RangeError(`unknown endless expression family: ${family}`);
+  }
+}
+
+function endlessSchedule(rng, count, rowCount, difficulty) {
+  const rows = shuffle(rng, Array.from({ length: rowCount }, (_, row) => row));
+  const packs = [];
+  let remaining = count;
+  let index = 0;
+  while (remaining > 0) {
+    const size = Math.min(difficulty.packSize, remaining);
+    packs.push({ row: rows[index % rows.length], size });
+    remaining -= size;
+    index += 1;
+  }
+  const events = [];
+  packs.forEach((pack, packIndex) => {
+    const group = Math.floor(packIndex / difficulty.simultaneousLanes);
+    for (let member = 0; member < pack.size; member += 1) {
+      events.push({ row: pack.row, spawnAt: group * 5 + member * GENERATION_CONFIG.spawn.packGapSeconds });
+    }
+  });
+  return events.sort((left, right) => left.spawnAt - right.spawnAt || left.row - right.row);
+}
+
+function selectEndlessAffixes(rng, difficulty, maySplit) {
+  if (difficulty.allowedAffixes.length === 0 || !chance(rng, difficulty.affixChance)) return [];
+  const choices = difficulty.allowedAffixes.filter((affix) => affix !== 'split' || maySplit);
+  if (choices.length === 0) return [];
+  const first = pick(rng, choices);
+  if (difficulty.maxAffixes < 2 || !chance(rng, 0.3)) return [first];
+  if (first === 'fast') {
+    const secondChoices = choices.filter((affix) => affix === 'shield' || affix === 'split');
+    return secondChoices.length ? ['fast', pick(rng, secondChoices)] : ['fast'];
+  }
+  return choices.includes('fast') ? ['fast', first] : [first];
+}
+
+function endlessCounterForEntry(entry) {
+  const expression = normalizeExpression(entry.expression);
+  if (entry.family === 'trigonometric') {
+    const parameters = [...new Set(expression.trigTerms.map((term) => term.rate ** 2))];
+    return parameters.map((parameter) => ({ operatorId: 'resonanceTower', parameter }));
+  }
+  return [];
 }
 
 export function generateEndlessWave(seed, roundNumber) {
   const difficulty = endlessDifficulty(roundNumber);
-  return generateWave({
-    seed,
-    chapter: ENDLESS_CHAPTER,
+  const streamName = `endless-${roundNumber}`;
+  const schedule = endlessSchedule(
+    createSeededRng(seed, 'level', streamName, 'schedule'),
+    difficulty.count,
+    ENDLESS_CHAPTER.board.rows,
+    difficulty,
+  );
+  const rng = createSeededRng(seed, 'level', streamName, 'expressions');
+  const families = ENDLESS_CHAPTER.families;
+  const entries = schedule.map((event, index) => {
+    const family = pick(rng, families);
+    const meta = GENERATION_CONFIG.families[family];
+    let expression = endlessExpression(rng, family, difficulty);
+    const isMixedElite = difficulty.mixedFrequencyElite && index === 0;
+    if (isMixedElite) {
+      const secondFrequency = Math.max(2, difficulty.eliteMaxFrequency);
+      expression = addExpressions(
+        trigonometric('cos', 1, nonZeroCoefficient(rng)),
+        trigonometric('cos', secondFrequency, nonZeroCoefficient(rng)),
+      );
+    }
+    const effectiveFamily = isMixedElite ? 'trigonometric' : family;
+    const effectiveMeta = GENERATION_CONFIG.families[effectiveFamily];
+    const basis = basisExpressions(expression);
+    const affixes = isMixedElite ? [] : selectEndlessAffixes(rng, difficulty, basis.length === 2);
+    const rewardConfig = GENERATION_CONFIG.rewards;
+    return {
+      id: `${streamName}-${mixSeed(seed, streamName, index).toString(16)}`,
+      spawnAt: round(event.spawnAt, GENERATION_CONFIG.spawn.timePrecision),
+      row: event.row,
+      typeId: `procedural-${effectiveFamily}`,
+      name: isMixedElite ? `混頻${effectiveMeta.name}` : meta.name,
+      art: effectiveMeta.art,
+      family: effectiveFamily,
+      expression: cloneExpression(expression),
+      speed: round(effectiveMeta.speed * difficulty.speedMultiplier, GENERATION_CONFIG.output.speedPrecision),
+      reward: Math.ceil(
+        effectiveMeta.reward
+        * (rewardConfig.endless.baseMultiplier + Math.min(
+          rewardConfig.endless.maximumRoundBonus,
+          roundNumber * rewardConfig.endless.perRound,
+        ))
+        * (affixes.includes('fast') ? rewardConfig.affixMultipliers.fast : 1)
+        * (affixes.includes('shield') ? rewardConfig.affixMultipliers.shield : 1),
+      ),
+      affixes,
+      splitExpressions: splitChildren(expression, affixes.includes('split')),
+      possibleAffixes: [...difficulty.allowedAffixes],
+      ...(isMixedElite ? { eliteKind: 'mixed-frequency' } : {}),
+    };
+  });
+  const elite = entries.find((entry) => entry.eliteKind === 'mixed-frequency');
+  const counterRequirements = elite ? [{
+    row: elite.row,
+    family: elite.family,
+    warning: '混頻精英需要兩個已預告的共振參數',
+    operators: endlessCounterForEntry(elite),
+  }] : [];
+  const wave = {
+    id: streamName,
+    kind: 'endless',
+    name: `無限證明 ${roundNumber}`,
+    hint: ENDLESS_CHAPTER.hint,
+    theme: ENDLESS_CHAPTER.theme,
     chapterIndex: CHAPTERS.length,
     endlessRound: roundNumber,
-    count: difficulty.count,
-    limits: {
-      maxItems: difficulty.maxItems,
-      maxPower: difficulty.maxPower,
-      maxFrequency: difficulty.maxFrequency,
-    },
-    speedScale: difficulty.speedMultiplier,
-  });
+    entries,
+    requiredTags: [...new Set(entries.map((entry) => entry.family))],
+    counterRequirements,
+    guaranteedSupply: guaranteeForRequirements(counterRequirements),
+    difficulty,
+  };
+  wave.summary = summarizeWave(wave);
+  return wave;
 }

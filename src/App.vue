@@ -1,6 +1,8 @@
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 
+import { GAMEPLAY_CONFIG } from './config/gameplay.js';
+import { PRESENTATION_CONFIG } from './config/presentation.js';
 import {
   advanceEnemyTutorial,
   advanceWeaponTutorial,
@@ -12,60 +14,69 @@ import {
   discardConstantItem,
   discardFormulaItem,
   discardStoredConstant,
-  discardTower,
   installAssembly,
   placeTower,
   prepareAssembly,
+  recycleTower,
   selectArsenalItem,
   selectConstantItem,
   selectEnemy,
   selectFormulaItem,
   selectStoredConstant,
-  startGame,
   startWave,
   tick,
   togglePause,
   toggleSpeed,
-  toggleTower,
 } from './game/engine.js';
 import BattlefieldStage from './components/BattlefieldStage.vue';
+import ConfirmationDialog from './components/ConfirmationDialog.vue';
 import DerivationLog from './components/DerivationLog.vue';
 import EnemyFormulaPanel from './components/EnemyFormulaPanel.vue';
 import GameHud from './components/GameHud.vue';
 import GameOverlay from './components/GameOverlay.vue';
+import GameResultDialog from './components/GameResultDialog.vue';
 import GameWorkbench from './components/GameWorkbench.vue';
+import LevelSelectScreen from './components/LevelSelectScreen.vue';
 import OperatorDock from './components/OperatorDock.vue';
 import WavePrepBar from './components/WavePrepBar.vue';
-
-function randomSeed() {
-  const values = new Uint32Array(1);
-  globalThis.crypto?.getRandomValues(values);
-  return values[0] || ((Date.now() ^ Math.floor(performance.now() * 1000)) >>> 0);
-}
+import { useLevelCampaign, randomSeed } from './composables/useLevelCampaign.js';
+import { OPERATOR_QUEUE_CAPACITY } from './game/content.js';
 
 const game = reactive(createGame(randomSeed()));
 const dragPayload = ref(null);
 const dragOverTrash = ref(false);
+const dragOverTowerId = ref(null);
+const recycleArmed = ref(false);
 let audioContext = null;
 let animationFrame = 0;
 let previousTime = 0;
+
+const { audio } = PRESENTATION_CONFIG;
+const configurableTowerIds = [
+  ...GAMEPLAY_CONFIG.combat.tower.configurableTypeIds,
+  GAMEPLAY_CONFIG.combat.tower.boundedTypeId,
+];
+const trashDiscardKinds = new Set(['arsenal', 'formula', 'constant', 'stored-constant']);
 
 function tone(kind = 'select') {
   if (!game.sound) return;
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
+    if (!audioContext && navigator.userActivation && !navigator.userActivation.isActive) return;
     audioContext ??= new AudioContextClass();
     const oscillator = audioContext.createOscillator();
     const gain = audioContext.createGain();
-    const frequencies = { select: 420, place: 560, success: 740, danger: 180 };
     oscillator.type = kind === 'danger' ? 'sawtooth' : 'sine';
-    oscillator.frequency.value = frequencies[kind] ?? frequencies.select;
-    gain.gain.setValueAtTime(0.045, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.11);
+    oscillator.frequency.value = audio.frequenciesHz[kind] ?? audio.frequenciesHz.select;
+    gain.gain.setValueAtTime(audio.initialGain, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(
+      audio.finalGain,
+      audioContext.currentTime + audio.fadeSeconds,
+    );
     oscillator.connect(gain).connect(audioContext.destination);
     oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.12);
+    oscillator.stop(audioContext.currentTime + audio.durationSeconds);
   } catch {
     // Audio is optional; game behavior never depends on browser audio permission.
   }
@@ -77,20 +88,57 @@ function act(operation, sound = 'select') {
   return changed;
 }
 
-function replaceGame(seed) {
-  const freshGame = createGame(seed);
+function replaceGame(seed, options = {}) {
+  const freshGame = createGame(seed, options);
   for (const key of Object.keys(game)) {
     if (!(key in freshGame)) delete game[key];
   }
   Object.assign(game, freshGame);
+  dragPayload.value = null;
+  dragOverTrash.value = false;
+  dragOverTowerId.value = null;
+  recycleArmed.value = false;
   previousTime = 0;
   tone('select');
 }
 
+const {
+  confirmation,
+  levelSelectNotice,
+  newlyUnlockedLabel,
+  pendingConfirmation,
+  progress,
+  progressSaveFailed,
+  screen,
+  selectedLevelIndex,
+  skipTutorial,
+  cancelConfirmation,
+  confirmPendingAction,
+  openLevel,
+  requestProgressReset,
+  requestRunExit,
+  retryRun,
+  returnToLevelSelect,
+  startEndless,
+  startNextRun,
+  startSelectedLevel,
+} = useLevelCampaign({
+  game,
+  replaceGame,
+  resetClock: () => { previousTime = 0; },
+});
+
+function disarmRecycle() {
+  recycleArmed.value = false;
+  dragOverTowerId.value = null;
+}
+
 const actions = {
-  start: () => act(() => startGame(game), 'success'),
   startWave: () => act(() => startWave(game), 'success'),
-  selectArsenal: (itemId) => act(() => selectArsenalItem(game, itemId)),
+  selectArsenal: (itemId) => {
+    disarmRecycle();
+    return act(() => selectArsenalItem(game, itemId));
+  },
   placeTower: (row, column) => act(() => placeTower(game, row, column), 'place'),
   enemy: (enemyId) => {
     if (game.targetingOperator) return act(() => applyTargetOperator(game, enemyId), 'place');
@@ -98,11 +146,17 @@ const actions = {
   },
   tower: (towerId) => {
     const tower = game.towers.find((candidate) => candidate.id === towerId);
-    const configurable = ['subtract', 'definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'];
-    if (game.selectedStoredConstantId !== null && configurable.includes(tower?.typeId)) {
+    if (!tower || tower.tutorialPreset) return false;
+    if (recycleArmed.value) {
+      const changed = act(() => recycleTower(game, towerId), 'success');
+      recycleArmed.value = false;
+      dragOverTowerId.value = null;
+      return changed;
+    }
+    if (game.selectedStoredConstantId !== null && configurableTowerIds.includes(tower?.typeId)) {
       return act(() => installAssembly(game, towerId), 'success');
     }
-    return act(() => toggleTower(game, towerId));
+    return false;
   },
   pause: () => act(() => togglePause(game)),
   speed: () => act(() => toggleSpeed(game)),
@@ -110,9 +164,14 @@ const actions = {
     game.sound = !game.sound;
     if (game.sound) tone('select');
   },
-  restartSame: () => replaceGame(game.runSeed),
-  restartNew: () => replaceGame(randomSeed()),
-  cancel: () => act(() => cancelSelection(game)),
+  retrySame: () => retryRun(true),
+  retryNew: () => retryRun(false),
+  next: () => startNextRun(),
+  selectLevel: () => requestRunExit(),
+  cancel: () => {
+    disarmRecycle();
+    return act(() => cancelSelection(game));
+  },
   dismissTutorial: () => {
     game.tutorialVisible = false;
     tone('select');
@@ -124,10 +183,31 @@ const actions = {
   discardFormula: (itemId) => act(() => discardFormulaItem(game, itemId), 'danger'),
   discardConstant: (itemId) => act(() => discardConstantItem(game, itemId), 'danger'),
   discardStoredConstant: (itemId) => act(() => discardStoredConstant(game, itemId), 'danger'),
-  discardTower: (towerId) => act(() => discardTower(game, towerId), 'danger'),
-  pickFormula: (itemId) => act(() => selectFormulaItem(game, itemId)),
-  pickConstant: (itemId) => act(() => selectConstantItem(game, itemId)),
-  pickStoredConstant: (itemId) => act(() => selectStoredConstant(game, itemId)),
+  recycleTower: (towerId) => {
+    const changed = act(() => recycleTower(game, towerId), 'success');
+    recycleArmed.value = false;
+    dragOverTowerId.value = null;
+    return changed;
+  },
+  toggleRecycle: () => {
+    recycleArmed.value = !recycleArmed.value;
+    dragOverTowerId.value = null;
+    if (recycleArmed.value) cancelSelection(game);
+    tone('select');
+    return true;
+  },
+  pickFormula: (itemId) => {
+    disarmRecycle();
+    return act(() => selectFormulaItem(game, itemId));
+  },
+  pickConstant: (itemId) => {
+    disarmRecycle();
+    return act(() => selectConstantItem(game, itemId));
+  },
+  pickStoredConstant: (itemId) => {
+    disarmRecycle();
+    return act(() => selectStoredConstant(game, itemId));
+  },
   prepareAssembly: () => act(() => prepareAssembly(game), 'success'),
   closeFormula: () => {
     game.selectedEnemyId = null;
@@ -141,6 +221,9 @@ function closestElement(target, selector) {
 function handleDragStart(event) {
   const item = closestElement(event.target, '[data-drag-kind]');
   if (!item) return;
+  recycleArmed.value = false;
+  dragOverTowerId.value = null;
+  dragOverTrash.value = false;
   dragPayload.value = { kind: item.dataset.dragKind, id: item.dataset.dragId };
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move';
@@ -151,16 +234,32 @@ function handleDragStart(event) {
 function handleDragEnd() {
   dragPayload.value = null;
   dragOverTrash.value = false;
+  dragOverTowerId.value = null;
+  recycleArmed.value = false;
 }
 
 function handleDragOver(event) {
-  if (!dragPayload.value || !closestElement(event.target, '.trash-dropzone')) return;
+  if (!dragPayload.value) return;
+  const tower = closestElement(event.target, '[data-recycle-tower-id]');
+  if (dragPayload.value.kind === 'recycle-tool' && tower) {
+    event.preventDefault();
+    dragOverTowerId.value = tower.dataset.recycleTowerId;
+    dragOverTrash.value = false;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    return;
+  }
+  if (!trashDiscardKinds.has(dragPayload.value.kind) || !closestElement(event.target, '.trash-dropzone')) return;
   event.preventDefault();
   dragOverTrash.value = true;
+  dragOverTowerId.value = null;
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 }
 
 function handleDragLeave(event) {
+  const tower = closestElement(event.target, '[data-recycle-tower-id]');
+  if (tower && !(event.relatedTarget instanceof Node && tower.contains(event.relatedTarget))) {
+    if (dragOverTowerId.value === tower.dataset.recycleTowerId) dragOverTowerId.value = null;
+  }
   const bin = closestElement(event.target, '.trash-dropzone');
   if (!bin || (event.relatedTarget instanceof Node && bin.contains(event.relatedTarget))) return;
   dragOverTrash.value = false;
@@ -171,35 +270,57 @@ function discardPayload({ kind, id }) {
   else if (kind === 'formula') actions.discardFormula(id);
   else if (kind === 'constant') actions.discardConstant(id);
   else if (kind === 'stored-constant') actions.discardStoredConstant(id);
-  else if (kind === 'tower') actions.discardTower(id);
 }
 
 function handleDrop(event) {
-  if (!dragPayload.value || !closestElement(event.target, '.trash-dropzone')) return;
-  event.preventDefault();
-  discardPayload(dragPayload.value);
+  if (!dragPayload.value) return;
+  const tower = closestElement(event.target, '[data-recycle-tower-id]');
+  if (dragPayload.value.kind === 'recycle-tool' && tower) {
+    event.preventDefault();
+    actions.recycleTower(tower.dataset.recycleTowerId);
+  } else if (
+    trashDiscardKinds.has(dragPayload.value.kind)
+    && closestElement(event.target, '.trash-dropzone')
+  ) {
+    event.preventDefault();
+    discardPayload(dragPayload.value);
+  }
   handleDragEnd();
 }
 
 function handleRootKeydown(event) {
   if (event.key !== 'Delete') return;
+  const tower = closestElement(event.target, '[data-recycle-tower-id]');
+  if (tower) {
+    event.preventDefault();
+    actions.recycleTower(tower.dataset.recycleTowerId);
+    return;
+  }
   const item = closestElement(event.target, '[data-drag-kind]');
-  if (!item) return;
+  if (!item || !trashDiscardKinds.has(item.dataset.dragKind)) return;
   event.preventDefault();
   discardPayload({ kind: item.dataset.dragKind, id: item.dataset.dragId });
 }
 
 function handleWindowKeydown(event) {
+  if (screen.value !== 'game' || pendingConfirmation.value || ['won', 'lost'].includes(game.phase)) return;
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+  if (event.key === 'Escape') {
+    actions.cancel();
+    return;
+  }
   if (game.phase === 'preparing' && (game.enemyTutorialQueue.length > 0 || game.weaponTutorialQueue.length > 0)) return;
-  if (/^[1-8]$/.test(event.key)) {
-    const item = game.operatorQueue[Number(event.key) - 1];
+  const shortcutIndex = Number(event.key);
+  if (
+    Number.isInteger(shortcutIndex)
+    && shortcutIndex >= 1
+    && shortcutIndex <= OPERATOR_QUEUE_CAPACITY
+  ) {
+    const item = game.operatorQueue[shortcutIndex - 1];
     if (item) {
       event.preventDefault();
       actions.selectArsenal(item.id);
     }
-  } else if (event.key === 'Escape') {
-    actions.cancel();
   } else if (event.code === 'Space') {
     event.preventDefault();
     actions.pause();
@@ -207,13 +328,18 @@ function handleWindowKeydown(event) {
 }
 
 function handleVisibilityChange() {
-  if (document.hidden && ['preparing', 'running'].includes(game.phase) && !game.paused) togglePause(game);
+  if (
+    screen.value === 'game'
+    && document.hidden
+    && ['preparing', 'running'].includes(game.phase)
+    && !game.paused
+  ) togglePause(game);
 }
 
 function frame(now) {
   const elapsed = previousTime ? (now - previousTime) / 1000 : 0;
   previousTime = now;
-  tick(game, elapsed);
+  if (screen.value === 'game') tick(game, elapsed);
   animationFrame = requestAnimationFrame(frame);
 }
 
@@ -230,12 +356,28 @@ onBeforeUnmount(() => {
   audioContext?.close();
 });
 
-defineExpose({ game, actions });
+defineExpose({ game, actions, progress });
 </script>
 
 <template>
+  <LevelSelectScreen
+    v-if="screen === 'levels'"
+    :inert="Boolean(pendingConfirmation)"
+    :progress="progress"
+    :selected-level-index="selectedLevelIndex"
+    :skip-tutorial="skipTutorial"
+    :notice="levelSelectNotice"
+    @select-level="openLevel"
+    @update:skip-tutorial="skipTutorial = $event"
+    @start-level="startSelectedLevel"
+    @start-endless="startEndless"
+    @request-reset-progress="requestProgressReset"
+  />
+
   <main
+    v-else
     class="game-shell"
+    :inert="Boolean(pendingConfirmation) || ['won', 'lost'].includes(game.phase)"
     @dragstart="handleDragStart"
     @dragend="handleDragEnd"
     @dragover="handleDragOver"
@@ -248,7 +390,7 @@ defineExpose({ game, actions });
       @speed="actions.speed"
       @sound="actions.sound"
       @pause="actions.pause"
-      @restart="actions.restartSame"
+      @select-level="actions.selectLevel"
     />
 
     <OperatorDock :state="game" :drag-payload="dragPayload" @select="actions.selectArsenal" />
@@ -258,6 +400,8 @@ defineExpose({ game, actions });
         <BattlefieldStage
           :state="game"
           :drag-payload="dragPayload"
+          :drag-over-tower-id="dragOverTowerId"
+          :recycle-armed="recycleArmed"
           @place-tower="actions.placeTower"
           @enemy="actions.enemy"
           @tower="actions.tower"
@@ -270,13 +414,15 @@ defineExpose({ game, actions });
 
       <GameWorkbench
         :state="game"
-        :dragging="Boolean(dragPayload)"
+        :discard-dragging="Boolean(dragPayload && trashDiscardKinds.has(dragPayload.kind))"
         :drag-over="dragOverTrash"
         :drag-payload="dragPayload"
+        :recycle-armed="recycleArmed"
         @pick-formula="actions.pickFormula"
         @pick-constant="actions.pickConstant"
         @pick-stored-constant="actions.pickStoredConstant"
         @prepare-assembly="actions.prepareAssembly"
+        @toggle-recycle="actions.toggleRecycle"
       />
     </div>
 
@@ -289,16 +435,35 @@ defineExpose({ game, actions });
     <div data-bind="overlay">
       <GameOverlay
         :state="game"
-        @start="actions.start"
         @cancel="actions.cancel"
         @confirm-partial="actions.confirmPartial"
         @advance-enemy-tutorial="actions.advanceEnemyTutorial"
         @advance-weapon-tutorial="actions.advanceWeaponTutorial"
         @pause="actions.pause"
-        @restart-same="actions.restartSame"
-        @restart-new="actions.restartNew"
+        @select-level="actions.selectLevel"
       />
     </div>
     <p class="sr-only" data-bind="announcer" aria-live="polite">{{ game.toast }}</p>
   </main>
+
+  <GameResultDialog
+    v-if="screen === 'game' && ['won', 'lost'].includes(game.phase)"
+    :state="game"
+    :newly-unlocked-label="newlyUnlockedLabel"
+    :progress-save-failed="progressSaveFailed"
+    @retry-same="actions.retrySame"
+    @retry-new="actions.retryNew"
+    @next="actions.next"
+    @select-level="returnToLevelSelect"
+  />
+
+  <ConfirmationDialog
+    :open="Boolean(pendingConfirmation)"
+    :title="confirmation.title"
+    :description="confirmation.description"
+    :confirm-label="confirmation.confirmLabel"
+    :danger="confirmation.danger"
+    @confirm="confirmPendingAction"
+    @cancel="cancelConfirmation"
+  />
 </template>
