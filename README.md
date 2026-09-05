@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-開發伺服器預設位於 <http://127.0.0.1:5173>。
+開發伺服器預設位於 <http://127.0.0.1:5173/>。
 
 開發模式已安裝 Vue DevTools。可按 `Alt + Shift + D` 切換頁內工具列，或開啟 <http://127.0.0.1:5173/__devtools__/> 使用獨立介面；正式版建置不會帶入 DevTools。
 
@@ -30,7 +30,13 @@ npm run build
 npm run preview
 ```
 
-預覽伺服器預設位於 <http://127.0.0.1:4173>；正式版輸出至 `dist/`。
+預覽伺服器預設位於 <http://127.0.0.1:4173/>；正式版輸出至 `dist/`。建置檔使用相對資源路徑，因此既可用 `npm run preview`，也可讓 Live Server 從任意父目錄開啟 `dist/index.html`，不會再因網站掛載路徑不同而找不到 CSS 或 JavaScript。
+
+## GitHub Pages 部署
+
+專案透過 `.github/workflows/deploy-pages.yml` 在每次推送 `main` 時執行 `npm ci`、建立正式版並將 `dist/` 上傳至 GitHub Pages。首次使用時，在 repository 的 **Settings → Pages → Build and deployment → Source** 選擇 **GitHub Actions**；不需也無法在 branch 模式中指定 `/dist`。
+
+正式版使用可攜式相對路徑，部署到 <https://w-x-dai.github.io/Math_War/>、repository 更名、根網域或自訂網域時都不需要再修改 Vite `base`。
 
 ## 核心玩法
 
