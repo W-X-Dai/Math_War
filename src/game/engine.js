@@ -337,9 +337,17 @@ function updateEnemies(state, dt) {
     enemy.divergentTimer = Math.max(0, enemy.divergentTimer - dt);
     enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
 
-    const blocker = blockingTower(state, enemy);
     const atBase = enemy.position <= BASE_POSITION;
-    if (blocker || atBase) {
+    if (atBase) {
+      // Reaching the proof core is a leak, not a new combat target: settle the
+      // current coefficient damage once, then remove the enemy without reward.
+      strike(state, enemy, null);
+      enemy.dead = true;
+      continue;
+    }
+
+    const blocker = blockingTower(state, enemy);
+    if (blocker) {
       if (enemy.attackTimer <= 0) {
         strike(state, enemy, blocker);
         enemy.attackTimer = ATTACK_INTERVAL;

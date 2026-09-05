@@ -127,6 +127,27 @@ test('failed arsenal selection keeps both card and energy', () => {
   assert.equal(state.energy, 0);
 });
 
+test('an enemy damages the base once and leaves without a kill reward', () => {
+  const state = createGame(131);
+  freezeSpawns(state);
+  const leakingEnemy = testEnemy(polynomial(12), {
+    position: 0.12,
+    attackTimer: 99,
+    reward: 80,
+  });
+  state.enemies.push(leakingEnemy);
+  const energyBefore = state.energy;
+
+  tick(state, 0.05);
+  assert.equal(state.baseHp, 488);
+  assert.equal(state.enemies.length, 0);
+  assert.equal(state.kills, 0);
+  assert.equal(state.energy, energyBefore);
+
+  tick(state, 5);
+  assert.equal(state.baseHp, 488);
+});
+
 test('non-leading formula and constant cards assemble and install', () => {
   const state = createGame(14);
   const formula = state.formulaQueue.find((item) => item.cardId === 'doubleK');
