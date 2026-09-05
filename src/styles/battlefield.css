@@ -618,7 +618,11 @@
   width: 0;
   height: 0;
   pointer-events: none;
-  will-change: top, left;
+  transform: translate(
+    var(--projectile-offset-x, 0cqw),
+    var(--projectile-offset-y, 0px)
+  );
+  will-change: top, left, transform;
 }
 
 .projectile__glyph {
@@ -638,7 +642,7 @@
   white-space: nowrap;
   opacity: var(--projectile-opacity, 1);
   filter: drop-shadow(0 0 5px var(--projectile-color)) drop-shadow(0 4px 4px rgba(0, 0, 0, 0.64));
-  transform: translate(var(--projectile-anchor-x, -50%), -50%) scale(var(--projectile-scale, 1));
+  transform: translate(-50%, -50%) scale(var(--projectile-scale, 1));
   transform-origin: center;
   will-change: opacity, transform;
 }

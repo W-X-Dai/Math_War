@@ -868,6 +868,56 @@ test('a projectile changes the enemy only when its flight reaches the impact bou
   assert.equal(state.effects.filter((effect) => effect.type === 'operator').length, 1);
 });
 
+test('a tower projectile reaches a moving enemy near the base before it leaks', () => {
+  const state = createGame(460);
+  freezeSpawns(state);
+  state.towers = [];
+  state.effects = [];
+  const target = testEnemy(polynomial(7), {
+    id: 'near-base-moving-target', position: 0.17, speed: 0.015, reward: 80,
+  });
+  const tower = configuredTower('derivative');
+  state.enemies = [target];
+  state.towers = [tower];
+  const baseHpBefore = state.baseHp;
+
+  tick(state, 0.01);
+  const [projectile] = projectileEffects(state);
+  tower.cooldown = 999;
+  assert.equal(projectile.travelTime, 0.52);
+
+  advanceBy(state, projectile.impactIn + 0.001);
+
+  assert.equal(projectile.status, 'impacted');
+  assert.equal(projectile.missed, false);
+  assert.equal(state.kills, 1);
+  assert.equal(state.baseHp, baseHpBefore);
+});
+
+test('a non-lethal impact pulse stays attached after same-frame enemy movement', () => {
+  const state = createGame(461);
+  freezeSpawns(state);
+  state.towers = [];
+  state.effects = [];
+  const target = testEnemy(polynomial([term(1, 2)]), {
+    id: 'moving-impact-target', position: 0.72, speed: 0.1,
+  });
+  const tower = configuredTower('derivative');
+  state.enemies = [target];
+  state.towers = [tower];
+
+  tick(state, 0.01);
+  const [projectile] = projectileEffects(state);
+  tower.cooldown = 999;
+  projectile.impactIn = 0;
+
+  tick(state, 0.2);
+
+  assert.equal(projectile.status, 'impacted');
+  assert.equal(formatExpression(target.expression), '2x');
+  assert.equal(projectile.position, target.position);
+});
+
 test('pause freezes projectile flight and impact timing', () => {
   const state = createGame(451);
   freezeSpawns(state);

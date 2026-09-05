@@ -87,8 +87,8 @@ export const GAMEPLAY_CONFIG = deepFreeze({
   effects: {
     defaultLifetimeSeconds: 0.9,
     projectileTravelSeconds: {
-      lane: 5,
-      drop: 1.5,
+      lane: 0.52,
+      drop: 0.56,
     },
     projectileImpactLingerSeconds: 0.3,
     partialProjectileStaggerSeconds: 0.035,

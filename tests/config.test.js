@@ -10,6 +10,7 @@ import {
   OPERATOR_QUEUE_CAPACITY,
 } from '../src/config/content.js';
 import { GENERATION_CONFIG } from '../src/config/generation.js';
+import { GAMEPLAY_CONFIG } from '../src/config/gameplay.js';
 import { CHAPTER_TUTORIALS, ENEMY_GUIDES } from '../src/config/tutorial.js';
 import * as compatibilityContent from '../src/game/content.js';
 import { generateTutorialWave } from '../src/game/tutorial-content.js';
@@ -73,6 +74,13 @@ test('operator unlock order and efficiency match the six-chapter curriculum', ()
   assert.ok(2 / OPERATORS.secondDerivative.cooldown > 1 / OPERATORS.derivative.cooldown);
   assert.equal(OPERATORS.evaluateTower.cost, 130);
   assert.equal(OPERATORS.evaluateTower.cooldown, 6);
+});
+
+test('projectile timing preserves the sub-second combat contract', () => {
+  assert.deepEqual(GAMEPLAY_CONFIG.effects.projectileTravelSeconds, {
+    lane: 0.52,
+    drop: 0.56,
+  });
 });
 
 test('recognition tutorials are fixed two-to-three enemy sandboxes without affixes', () => {

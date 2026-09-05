@@ -643,6 +643,16 @@ function updateProjectileImpacts(state, dt) {
   }
 }
 
+function syncResolvedProjectiles(state) {
+  for (const effect of state.effects) {
+    if (effect.type !== 'projectile' || !effect.impactResolved || effect.missed) continue;
+    const target = state.enemies.find((enemy) => enemy.id === effect.targetId && !enemy.dead);
+    if (!target) continue;
+    effect.row = target.row;
+    effect.position = target.position;
+  }
+}
+
 function updateTransientState(state, dt) {
   for (const tower of state.towers) {
     tower.fireFlash = Math.max(0, tower.fireFlash - dt);
@@ -1213,6 +1223,9 @@ export function tick(state, rawDt) {
 
   updateTowers(state, dt);
   updateEnemies(state, dt);
+  // A non-lethal impact can resolve before this frame's enemy movement. Keep
+  // its short pulse attached to the surviving target in the rendered frame.
+  syncResolvedProjectiles(state);
   updateQueues(state, dt);
   state.enemies = state.enemies.filter((enemy) => !enemy.dead);
   checkWaveState(state);

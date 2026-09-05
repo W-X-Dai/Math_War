@@ -12,7 +12,12 @@ import {
   enemyFormulaClasses,
 } from '../ui/enemy-card.js';
 import { prettyFormula } from '../ui/format.js';
-import { projectileLabel } from '../ui/projectile.js';
+import {
+  isProjectileEffect,
+  projectileLabel,
+  projectileVisualGeometry,
+  resolveProjectileTargetLayouts,
+} from '../ui/projectile.js';
 import GameIcon from './GameIcon.vue';
 
 const props = defineProps({
@@ -123,6 +128,17 @@ const enemyPresentation = computed(() => {
     flushGroup();
   }
   return layouts;
+});
+
+let projectileLayoutCache = new Map();
+const projectileTargetPresentation = computed(() => {
+  const resolved = resolveProjectileTargetLayouts(
+    props.state.effects,
+    enemyPresentation.value,
+    projectileLayoutCache,
+  );
+  projectileLayoutCache = resolved.cache;
+  return resolved.layouts;
 });
 
 function occupied(row, column) {
@@ -237,10 +253,6 @@ function enemyLabel(enemyItem) {
   return `${enemyType(enemyItem).name}，${familyLabel(enemyItem)}${mutationText}，本體公式 ${body}，本體攻擊 ${enemyThreat(enemyItem)}，${action}`;
 }
 
-function isProjectileEffect(effect) {
-  return effect.type?.includes('projectile');
-}
-
 function effectClass(effect) {
   if (!isProjectileEffect(effect)) return ['combat-float', effect.type];
   const legacyDrop = effect.type === 'drop-projectile';
@@ -272,24 +284,26 @@ function effectStyle(effect) {
   };
 
   if (isProjectileEffect(effect)) {
-    const rawProgress = Number(effect.progress);
-    const progress = effect.status === 'impacted'
-      ? 1
-      : Math.min(1, Math.max(0, Number.isFinite(rawProgress) ? rawProgress : 0));
-    const trajectory = effect.trajectory ?? (effect.type === 'drop-projectile' ? 'drop' : 'lane');
-    const from = Number.isFinite(Number(effect.from)) ? Number(effect.from) : position;
-    const projectileX = trajectory === 'lane'
-      ? from + ((position - from) * progress)
-      : position;
-    const projectileY = trajectory === 'drop' ? laneY * progress : laneY;
+    const geometry = projectileVisualGeometry(
+      effect,
+      laneY,
+      projectileTargetPresentation.value.get(effect.id),
+    );
 
-    style['--projectile-progress'] = progress;
-    style['--projectile-x'] = `${projectileX * 100}%`;
-    style['--projectile-y'] = `${projectileY}%`;
-    style['--projectile-opacity'] = Math.min(1, progress * battlefield.projectile.opacityRamp);
+    style['--x'] = `${geometry.position * 100}%`;
+    style['--projectile-progress'] = geometry.progress;
+    style['--projectile-x'] = `${geometry.x * 100}%`;
+    style['--projectile-y'] = `${geometry.y}%`;
+    style['--projectile-offset-x'] = `${geometry.offsetX}cqw`;
+    style['--projectile-offset-y'] = `${geometry.offsetY}px`;
+    style['--projectile-opacity'] = Math.min(
+      1,
+      geometry.progress * battlefield.projectile.opacityRamp,
+    );
     style['--projectile-scale'] = battlefield.projectile.initialScale
-      + (progress * (battlefield.projectile.finalScale - battlefield.projectile.initialScale));
-    style['--projectile-anchor-x'] = enemyCardPlacement(position).anchorPercentage;
+      + (geometry.progress * (
+        battlefield.projectile.finalScale - battlefield.projectile.initialScale
+      ));
   }
   return style;
 }
