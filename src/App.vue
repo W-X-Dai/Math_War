@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 
 import {
+  advanceEnemyTutorial,
   advanceWeaponTutorial,
   applyTargetOperator,
   cancelSelection,
@@ -29,6 +30,7 @@ import {
 } from './game/engine.js';
 import BattlefieldStage from './components/BattlefieldStage.vue';
 import DerivationLog from './components/DerivationLog.vue';
+import EnemyFormulaPanel from './components/EnemyFormulaPanel.vue';
 import GameHud from './components/GameHud.vue';
 import GameOverlay from './components/GameOverlay.vue';
 import GameWorkbench from './components/GameWorkbench.vue';
@@ -117,6 +119,7 @@ const actions = {
   },
   confirmPartial: () => act(() => confirmPartial(game), 'success'),
   advanceWeaponTutorial: () => act(() => advanceWeaponTutorial(game), 'success'),
+  advanceEnemyTutorial: () => act(() => advanceEnemyTutorial(game), 'success'),
   discardArsenal: (itemId) => act(() => discardArsenalItem(game, itemId), 'danger'),
   discardFormula: (itemId) => act(() => discardFormulaItem(game, itemId), 'danger'),
   discardConstant: (itemId) => act(() => discardConstantItem(game, itemId), 'danger'),
@@ -188,6 +191,7 @@ function handleRootKeydown(event) {
 
 function handleWindowKeydown(event) {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+  if (game.phase === 'preparing' && (game.enemyTutorialQueue.length > 0 || game.weaponTutorialQueue.length > 0)) return;
   if (/^[1-8]$/.test(event.key)) {
     const item = game.operatorQueue[Number(event.key) - 1];
     if (item) {
@@ -259,8 +263,8 @@ defineExpose({ game, actions });
           @tower="actions.tower"
           @cancel="actions.cancel"
           @dismiss-tutorial="actions.dismissTutorial"
-          @close-formula="actions.closeFormula"
         />
+        <EnemyFormulaPanel :state="game" @close="actions.closeFormula" />
         <DerivationLog :logs="game.logs" />
       </div>
 
@@ -288,6 +292,7 @@ defineExpose({ game, actions });
         @start="actions.start"
         @cancel="actions.cancel"
         @confirm-partial="actions.confirmPartial"
+        @advance-enemy-tutorial="actions.advanceEnemyTutorial"
         @advance-weapon-tutorial="actions.advanceWeaponTutorial"
         @pause="actions.pause"
         @restart-same="actions.restartSame"

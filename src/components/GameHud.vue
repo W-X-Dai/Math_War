@@ -14,7 +14,7 @@ defineEmits(['speed', 'sound', 'pause', 'restart']);
 const chapterLabel = computed(() => (
   props.state.chapterIndex >= CHAPTERS.length
     ? `無限章・第 ${props.state.endlessRound} 輪`
-    : `第 ${props.state.chapterIndex + 1} 章・${CHAPTERS[props.state.chapterIndex]}`
+    : `第 ${props.state.chapterIndex + 1} 章・${CHAPTERS[props.state.chapterIndex]}${props.state.currentWave?.kind === 'tutorial' ? '・教學波' : ''}`
 ));
 </script>
 

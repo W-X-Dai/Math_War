@@ -1,10 +1,10 @@
 <script setup>
 import { computed } from 'vue';
 
-import { damage, differentiate, formatExpression } from '../domain/expression.js';
+import { formatExpression } from '../domain/expression.js';
 import { ENEMY_TYPES, OPERATORS } from '../game/content.js';
-import { enemyThreat, selectedEnemy } from '../game/engine.js';
-import { formatValue, prettyFormula } from '../ui/format.js';
+import { activeEnemyExpression, enemyThreat } from '../game/engine.js';
+import { prettyFormula } from '../ui/format.js';
 import { projectileLabel } from '../ui/projectile.js';
 import GameIcon from './GameIcon.vue';
 
@@ -13,7 +13,7 @@ const props = defineProps({
   dragPayload: { type: Object, default: null },
 });
 
-defineEmits(['place-tower', 'enemy', 'tower', 'cancel', 'dismiss-tutorial', 'close-formula']);
+defineEmits(['place-tower', 'enemy', 'tower', 'cancel', 'dismiss-tutorial']);
 
 const board = computed(() => props.state.board ?? { rows: 5, columns: 8, placeableColumns: 5 });
 const boardStyle = computed(() => {
@@ -30,18 +30,21 @@ const cells = computed(() => Array.from({ length: board.value.rows * board.value
   placement: index % board.value.columns < board.value.placeableColumns,
 })));
 
-const trackedEnemy = computed(() => selectedEnemy(props.state));
 const selectedStoredConstant = computed(() => (
   props.state.storedConstants?.find((item) => item.id === props.state.selectedStoredConstantId) ?? null
 ));
-const nextDerivative = computed(() => (
-  trackedEnemy.value ? differentiate(trackedEnemy.value.expression, 'x', 1) : null
-));
 
 const formulaText = (expression) => prettyFormula(formatExpression(expression));
+const formulaClass = (expression) => {
+  const length = formulaText(expression).length;
+  return {
+    'is-long': length > 18,
+    'is-very-long': length > 34,
+  };
+};
 
-// Keep the enemy's actual position untouched. Formula chips are laid out on a
-// separate horizontal track so a fast cluster cannot cover the equations.
+// The equation is the enemy, so it stays close to the simulation coordinate.
+// Only tightly packed enemies receive a small, centered horizontal fan-out.
 const enemyPresentation = computed(() => {
   const byRow = new Map();
   for (const enemyItem of props.state.enemies ?? []) {
@@ -60,40 +63,17 @@ const enemyPresentation = computed(() => {
 
     const flushGroup = () => {
       if (!group.length) return;
-      const safeLeft = 8;
-      const safeEnd = 75;
-      const cardGap = 0.75;
-      const chipWidth = Math.min(
-        10.5,
-        (safeEnd - safeLeft - (cardGap * (group.length - 1))) / group.length,
-      );
-      const safeRight = safeEnd - chipWidth;
-      const spacing = group.length > 1
-        ? chipWidth + cardGap
+      const middle = (group.length - 1) / 2;
+      const offsetStep = group.length > 1
+        ? Math.min(2.2, 7 / (group.length - 1))
         : 0;
-      const positions = group.map((enemyItem) => Number(enemyItem.position) || 0);
-      const averagePosition = positions.reduce((sum, position) => sum + position, 0) / group.length;
-      // These values mirror the battlefield path (16.5% + p × 78.5%) after
-      // accounting for the workbench rail and the chip's 82% anchor.
-      const naturalChipLeft = (position) => 17.25 + (position * 63.6);
-      const groupWidth = spacing * (group.length - 1);
-      const openTrack = safeRight - safeLeft - groupWidth;
-      const laneStep = Math.min(11.25, openTrack / 2);
-      const naturalStart = naturalChipLeft(averagePosition) - (groupWidth / 2);
-      let laneOffset = ((row % 3) - 1) * laneStep;
-      if (naturalStart < safeLeft + (laneStep * 2)) laneOffset = (row % 3) * laneStep;
-      if (naturalStart > safeRight - groupWidth - (laneStep * 2)) laneOffset = -(row % 3) * laneStep;
-      const desiredStart = Math.max(
-        safeLeft,
-        Math.min(safeRight - groupWidth, naturalStart + laneOffset),
-      );
       group.forEach((enemyItem, index) => {
         layouts.set(enemyItem.id, {
           slot: index,
           order: index,
           row,
-          chipOffset: desiredStart + (index * spacing) - naturalChipLeft(positions[index]),
-          chipWidth: chipWidth < 10.5 ? chipWidth : null,
+          clusterSize: group.length,
+          chipOffset: (index - middle) * offsetStep,
         });
       });
       group = [];
@@ -136,6 +116,9 @@ function towerSlot(tower) {
 }
 
 function towerLabel(tower) {
+  if (tower.tutorialPreset) {
+    return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，教學預置且已鎖定，耐久 ${Math.max(0, Math.ceil(tower.hp))}`;
+  }
   const configurable = towerConfigurable(tower);
   const interaction = selectedStoredConstant.value && configurable
     ? `點擊裝入常數 ${selectedStoredConstant.value.value}`
@@ -153,15 +136,16 @@ function laneStyle(row, position) {
 
 function enemyStyle(enemyItem) {
   const layout = enemyPresentation.value.get(enemyItem.id) ?? {
-    slot: 0, order: 0, chipOffset: 0, chipWidth: null,
+    slot: 0, order: 0, clusterSize: 1, chipOffset: 0,
   };
+  const position = Number(enemyItem.position) || 0;
   const style = {
     ...laneStyle(enemyItem.row, enemyItem.position),
     '--stack-slot': layout.slot,
     '--stack-x': `${layout.chipOffset}cqw`,
+    '--enemy-anchor-x': position >= 0.88 ? '-100%' : position <= 0.18 ? '0%' : '-50%',
     zIndex: 20 + layout.order,
   };
-  if (layout.chipWidth !== null) style['--chip-width'] = `${layout.chipWidth}cqw`;
   return style;
 }
 
@@ -169,7 +153,6 @@ function enemyType(enemyItem) {
   const fallback = ENEMY_TYPES[enemyItem.typeId] ?? {};
   return {
     name: enemyItem.name ?? fallback.name ?? '函數敵人',
-    art: enemyItem.art ?? fallback.art ?? 'enemy-art-polynomial',
     family: enemyItem.family ?? fallback.family,
   };
 }
@@ -182,13 +165,30 @@ function familyLabel(enemyItem) {
   return labels[enemyItem.family ?? enemyType(enemyItem).family] ?? '函數';
 }
 
-function mutationBadges(enemyItem) {
-  const labels = { fast: '快進', shield: '等式護盾', split: '分裂' };
-  return (enemyItem.affixes ?? []).map((id) => ({
-    id,
-    label: id === 'shield' && !enemyItem.shieldActive ? '護盾破除' : (labels[id] ?? id),
-    spent: id === 'shield' && !enemyItem.shieldActive,
-  }));
+function hasAffix(enemyItem, affix) {
+  return enemyItem.affixes?.includes(affix) ?? false;
+}
+
+function enemyTitle(enemyItem) {
+  const body = formulaText(enemyItem.expression);
+  if (!enemyItem.shieldExpression) return body;
+  return `護盾 ${formulaText(enemyItem.shieldExpression)}｜本體 ${body}`;
+}
+
+function enemyLabel(enemyItem) {
+  const body = formulaText(enemyItem.expression);
+  const mutations = [
+    hasAffix(enemyItem, 'fast') ? '快進變異' : null,
+    hasAffix(enemyItem, 'split') ? '分裂變異' : null,
+  ].filter(Boolean);
+  const mutationText = mutations.length ? `，${mutations.join('、')}` : '';
+  const action = props.state.targetingOperator
+    ? `點擊施作 ${OPERATORS[props.state.targetingOperator]?.name ?? '算子'}`
+    : '點擊查看公式';
+  if (enemyItem.shieldExpression) {
+    return `${enemyType(enemyItem).name}，${familyLabel(enemyItem)}${mutationText}，等式護盾 ${formulaText(enemyItem.shieldExpression)}，護盾後方本體 ${body}，本體攻擊 ${enemyThreat(enemyItem)}，${action}`;
+  }
+  return `${enemyType(enemyItem).name}，${familyLabel(enemyItem)}${mutationText}，本體公式 ${body}，本體攻擊 ${enemyThreat(enemyItem)}，${action}`;
 }
 
 function isProjectileEffect(effect) {
@@ -197,10 +197,11 @@ function isProjectileEffect(effect) {
 
 function effectClass(effect) {
   if (!isProjectileEffect(effect)) return ['combat-float', effect.type];
+  const legacyDrop = effect.type === 'drop-projectile';
   return [
     'projectile',
     `projectile--${effect.shape ?? (effect.type === 'subtract-projectile' ? 'subtract' : 'derivative')}`,
-    `is-${effect.trajectory ?? 'lane'}`,
+    `is-${effect.trajectory ?? (legacyDrop ? 'drop' : 'lane')}`,
     { 'is-impacted': effect.status === 'impacted' },
   ];
 }
@@ -225,13 +226,14 @@ function effectStyle(effect) {
     const progress = effect.status === 'impacted'
       ? 1
       : Math.min(1, Math.max(0, Number.isFinite(rawProgress) ? rawProgress : 0));
-    const trajectory = effect.trajectory ?? 'lane';
+    const trajectory = effect.trajectory ?? (effect.type === 'drop-projectile' ? 'drop' : 'lane');
     const from = Number.isFinite(Number(effect.from)) ? Number(effect.from) : position;
     const projectileX = trajectory === 'lane'
       ? from + ((position - from) * progress)
       : position;
     const projectileY = trajectory === 'drop' ? laneY * progress : laneY;
 
+    style['--projectile-progress'] = progress;
     style['--projectile-x'] = `${projectileX * 100}%`;
     style['--projectile-y'] = `${projectileY}%`;
     style['--projectile-opacity'] = Math.min(1, progress * 8);
@@ -287,20 +289,23 @@ function effectStyle(effect) {
             'is-paused': !tower.active,
             'is-configurable': towerConfigurable(tower),
             'is-filled': towerConfigurable(tower) && towerFilled(tower),
-            'is-awaiting-assembly': towerConfigurable(tower) && Boolean(selectedStoredConstant),
+            'is-awaiting-assembly': !tower.tutorialPreset && towerConfigurable(tower) && Boolean(selectedStoredConstant),
             'is-dragging': dragPayload?.kind === 'tower' && dragPayload.id === tower.id,
+            'is-tutorial-preset': tower.tutorialPreset,
           }"
           type="button"
           :style="laneStyle(tower.row, tower.position)"
           :aria-label="towerLabel(tower)"
-          aria-keyshortcuts="Delete"
-          draggable="true"
-          data-drag-kind="tower"
-          :data-drag-id="tower.id"
-          @click="$emit('tower', tower.id)"
+          :aria-disabled="tower.tutorialPreset ? 'true' : undefined"
+          :aria-keyshortcuts="tower.tutorialPreset ? undefined : 'Delete'"
+          :draggable="!tower.tutorialPreset"
+          :data-drag-kind="tower.tutorialPreset ? undefined : 'tower'"
+          :data-drag-id="tower.tutorialPreset ? undefined : tower.id"
+          @click="!tower.tutorialPreset && $emit('tower', tower.id)"
         >
           <span class="tower-sprite" :class="OPERATORS[tower.typeId].art" aria-hidden="true"></span>
           <span class="tower-slot" aria-hidden="true">{{ towerSlot(tower) }}</span>
+          <span v-if="tower.tutorialPreset" class="tutorial-preset-badge" aria-hidden="true">教學預置</span>
           <span class="tower-status"><i :style="{ width: `${Math.max(0, tower.hp / tower.maxHp) * 100}%` }"></i></span>
         </button>
       </div>
@@ -319,31 +324,40 @@ function effectStyle(effect) {
           data-action="enemy"
           :data-enemy-id="enemyItem.id"
           :data-stack-slot="enemyPresentation.get(enemyItem.id)?.slot ?? 0"
+          :data-cluster-size="enemyPresentation.get(enemyItem.id)?.clusterSize ?? 1"
+          :data-shield-active="enemyItem.shieldExpression ? 'true' : 'false'"
+          :data-body-expression="formulaText(enemyItem.expression)"
+          :data-active-expression="formulaText(activeEnemyExpression(enemyItem))"
           :class="{
             'is-selected': state.selectedEnemyId === enemyItem.id,
             'is-targetable': Boolean(state.targetingOperator),
             'is-divergent': enemyItem.divergentTimer > 0,
             'is-hit': enemyItem.hitFlash > 0,
+            'has-shield': Boolean(enemyItem.shieldExpression),
           }"
           type="button"
           :style="enemyStyle(enemyItem)"
-          :aria-label="`${enemyType(enemyItem).name}，${familyLabel(enemyItem)}，${formulaText(enemyItem.expression)}，目前攻擊 ${enemyThreat(enemyItem)}，點擊查看公式`"
+          :title="enemyTitle(enemyItem)"
+          :aria-label="enemyLabel(enemyItem)"
+          :aria-pressed="state.targetingOperator ? undefined : state.selectedEnemyId === enemyItem.id"
           @click="$emit('enemy', enemyItem.id)"
         >
-          <span class="enemy-sprite" :class="enemyType(enemyItem).art" aria-hidden="true"></span>
-          <span class="enemy-chip" :title="formulaText(enemyItem.expression)">
-            <span class="enemy-badges">
-              <small class="family-badge">{{ familyLabel(enemyItem) }}</small>
-              <small
-                v-for="mutation in mutationBadges(enemyItem)"
-                :key="mutation.id"
-                class="mutation-badge"
-                :class="[`is-${mutation.id}`, { 'is-spent': mutation.spent }]"
-              >{{ mutation.label }}</small>
+          <span class="enemy-expression-stack">
+            <span class="enemy-body-expression" data-expression-layer="body">
+              <strong class="enemy-formula" :class="formulaClass(enemyItem.expression)" data-role="enemy-body-formula">{{ formulaText(enemyItem.expression) }}</strong>
             </span>
-            <strong class="enemy-formula">{{ formulaText(enemyItem.expression) }}</strong>
-            <span class="enemy-meta">
-              <span class="damage-value" data-enemy-damage>攻擊 {{ enemyThreat(enemyItem) }}</span>
+            <span
+              v-if="enemyItem.shieldExpression"
+              class="enemy-shield-expression"
+              data-expression-layer="shield"
+              :data-shield-expression="formulaText(enemyItem.shieldExpression)"
+              aria-hidden="true"
+            >
+              <strong class="enemy-formula" :class="formulaClass(enemyItem.shieldExpression)" data-role="enemy-shield-formula">{{ formulaText(enemyItem.shieldExpression) }}</strong>
+            </span>
+            <span v-if="hasAffix(enemyItem, 'fast') || hasAffix(enemyItem, 'split')" class="enemy-mutation-marks" aria-hidden="true">
+              <i v-if="hasAffix(enemyItem, 'fast')" class="enemy-mutation-mark is-fast"></i>
+              <i v-if="hasAffix(enemyItem, 'split')" class="enemy-mutation-mark is-split"></i>
             </span>
           </span>
         </button>
@@ -367,7 +381,7 @@ function effectStyle(effect) {
       </div>
 
       <div class="wave-banner" data-bind="waveBanner" :class="{ 'is-visible': state.bannerTimer > 0 }" aria-live="polite">
-        {{ state.bannerTimer > 0 ? (state.currentWave?.name ?? (state.chapterIndex === 6 ? `無限第 ${state.endlessRound} 輪` : `第 ${state.chapterIndex + 1} 章`)) : '' }}
+        {{ state.bannerTimer > 0 ? `${state.currentWave?.kind === 'tutorial' ? '教學波｜' : ''}${state.currentWave?.name ?? (state.chapterIndex === 6 ? `無限第 ${state.endlessRound} 輪` : `第 ${state.chapterIndex + 1} 章`)}` : '' }}
       </div>
 
       <div class="targeting-mode" data-bind="targeting" :hidden="!state.targetingOperator">
@@ -382,26 +396,12 @@ function effectStyle(effect) {
           <button class="icon-button" type="button" data-action="dismiss-tutorial" aria-label="關閉教學" @click="$emit('dismiss-tutorial')">
             <GameIcon name="close" />
           </button>
-          <strong>先從軍械 Queue 選一張 D</strong>
-          <p>砲台只攻擊同一路；卡片成功使用才會消耗。注意敵人的函數族與變異徽章。</p>
+          <strong>{{ state.currentWave?.kind === 'tutorial' ? '固定教學波・預置砲塔已鎖定' : '先從軍械 Queue 選一張 D' }}</strong>
+          <p>{{ state.currentWave?.kind === 'tutorial' ? (state.currentWave?.objective ?? '觀察新敵人，使用預置軍械將公式化為 0。') : '砲台只攻擊同一路；卡片成功使用才會消耗。注意敵人的函數族與變異徽章。' }}</p>
           <button class="secondary-button" type="button" data-action="dismiss-tutorial" @click="$emit('dismiss-tutorial')">知道了</button>
         </article>
       </div>
     </div>
 
-    <aside class="formula-panel" data-bind="formulaPanel" :class="{ 'has-selection': trackedEnemy }" :hidden="!trackedEnemy">
-      <template v-if="trackedEnemy">
-        <div class="formula-panel-head">
-          <span>公式追蹤</span>
-          <button class="icon-button" type="button" data-action="close-formula" aria-label="關閉公式追蹤" @click="$emit('close-formula')">
-            <GameIcon name="close" />
-          </button>
-        </div>
-        <div class="formula-row"><span>目前</span><strong>{{ formulaText(trackedEnemy.expression) }}</strong></div>
-        <div class="formula-row"><span>下一發 D</span><strong>{{ formulaText(nextDerivative) }}</strong></div>
-        <div class="formula-row"><span>係數絕對值總和</span><strong class="damage-value">{{ formatValue(damage(trackedEnemy.expression)) }}</strong></div>
-        <div class="formula-row"><span>距離基地</span><strong>{{ Math.max(0, ((trackedEnemy.position - 0.125) * 8.7)).toFixed(1) }} 格</strong></div>
-      </template>
-    </aside>
   </section>
 </template>

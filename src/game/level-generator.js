@@ -281,6 +281,7 @@ function generateWave({ seed, chapter, chapterIndex, endlessRound = 0, count, li
 
   const wave = {
     id: endlessRound > 0 ? `endless-${endlessRound}` : chapter.id,
+    kind: endlessRound > 0 ? 'endless' : 'challenge',
     name: endlessRound > 0 ? `無限證明 ${endlessRound}` : chapter.name,
     hint: chapter.hint,
     theme: chapter.theme,

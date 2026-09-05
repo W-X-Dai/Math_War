@@ -1,8 +1,9 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 
 import { OPERATORS } from '../game/content.js';
 import { partialPreview } from '../game/engine.js';
+import { ENEMY_GUIDES } from '../game/tutorial-content.js';
 import { formatValue, prettyFormula } from '../ui/format.js';
 import GameIcon from './GameIcon.vue';
 
@@ -10,13 +11,33 @@ const props = defineProps({
   state: { type: Object, required: true },
 });
 
+const tutorialHeading = ref(null);
+
 defineEmits([
-  'start', 'cancel', 'confirm-partial', 'advance-weapon-tutorial',
+  'start', 'cancel', 'confirm-partial', 'advance-enemy-tutorial', 'advance-weapon-tutorial',
   'pause', 'restart-same', 'restart-new',
 ]);
 
 const preview = computed(() => (props.state.partialConfirmOpen ? partialPreview(props.state) : []));
+const newEnemy = computed(() => {
+  const guideId = props.state.enemyTutorialQueue?.[0];
+  if (!guideId) return null;
+  return Array.isArray(ENEMY_GUIDES)
+    ? ENEMY_GUIDES.find((guide) => guide.id === guideId) ?? null
+    : ENEMY_GUIDES[guideId] ?? null;
+});
 const newWeapon = computed(() => OPERATORS[props.state.weaponTutorialQueue?.[0]] ?? null);
+const enemyTutorialAction = computed(() => {
+  const remaining = props.state.enemyTutorialQueue?.length ?? 0;
+  if (remaining > 1) return `下一個敵人（還有 ${remaining - 1}）`;
+  if (props.state.weaponTutorialQueue?.length) return '查看新軍械';
+  return props.state.currentWave?.kind === 'tutorial' ? '進入教學整備' : '開始整備';
+});
+const weaponTutorialAction = computed(() => {
+  const remaining = props.state.weaponTutorialQueue?.length ?? 0;
+  if (remaining > 1) return `下一張（還有 ${remaining - 1}）`;
+  return props.state.currentWave?.kind === 'tutorial' ? '進入教學整備' : '開始整備';
+});
 const weaponUsage = computed(() => {
   if (newWeapon.value?.kind === 'tower') return '持續型砲台';
   if (newWeapon.value?.kind === 'global') return '全場一次性武器';
@@ -33,20 +54,29 @@ const weaponSteps = computed(() => {
   const configurable = ['definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower'];
   if (configurable.includes(newWeapon.value?.id)) {
     return [
-      '先從軍械 Queue 選牌，再點亮地圖空格部署。',
+      '先從軍械庫選牌，再點亮地圖空格部署。',
       newWeapon.value.id === 'definiteIntegralTower'
         ? '在工坊組出上下界，從常數庫依序各裝入一次。'
         : '在工坊組出需要的數值，從常數庫選取後點塔裝入。',
     ];
   }
   if (newWeapon.value?.kind === 'tower') {
-    return ['從軍械 Queue 選牌，再點亮地圖空格部署。', '砲台會持續攻擊同一路最前方的敵人。'];
+    return ['從軍械庫選牌，再點亮地圖空格部署。', '砲台會持續攻擊同一路最前方的敵人。'];
   }
   if (newWeapon.value?.kind === 'global') {
-    return ['從軍械 Queue 選牌，先查看全場公式預覽。', '確認施放後才消耗卡片與算力；每輪限用一次。'];
+    return ['從軍械庫選牌，先查看全場公式預覽。', '確認施放後才消耗卡片與算力；每輪限用一次。'];
   }
-  return ['從軍械 Queue 選牌，再點擊一隻敵人施放。', '目標無效或算力不足時不會消耗卡片。'];
+  return ['從軍械庫選牌，再點擊一隻敵人施放。', '目標無效或算力不足時不會消耗卡片。'];
 });
+
+watch(
+  () => `${props.state.phase}|${props.state.enemyTutorialQueue?.[0] ?? ''}|${props.state.weaponTutorialQueue?.[0] ?? ''}`,
+  async () => {
+    await nextTick();
+    tutorialHeading.value?.focus();
+  },
+  { flush: 'post' },
+);
 </script>
 
 <template>
@@ -68,10 +98,13 @@ const weaponSteps = computed(() => {
           <li
             v-for="item in preview"
             :key="item.id"
-            :class="{ 'will-die': item.dies, 'will-rise': item.damageAfter > item.damageBefore }"
+            :class="{
+              'will-die': item.dies || item.breaksShield,
+              'will-rise': item.damageAfter > item.damageBefore,
+            }"
           >
             <span>{{ prettyFormula(item.before) }} → {{ prettyFormula(item.after) }}</span>
-            <b>{{ item.shielded ? '護盾抵銷' : item.dies ? '歸零' : `${formatValue(item.damageBefore)} → ${formatValue(item.damageAfter)}` }}</b>
+            <b>{{ item.breaksShield ? '護盾破除' : item.layer === 'shield' ? '護盾更新' : item.dies ? '歸零' : `${formatValue(item.damageBefore)} → ${formatValue(item.damageAfter)}` }}</b>
           </li>
         </template>
         <li v-else><span>場上沒有敵人</span></li>
@@ -103,20 +136,64 @@ const weaponSteps = computed(() => {
   </div>
 
   <div
+    v-else-if="newEnemy && state.phase === 'preparing'"
+    class="overlay enemy-tutorial-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="enemy-tutorial-title"
+    aria-describedby="enemy-tutorial-description enemy-tutorial-clue"
+  >
+    <article class="modal enemy-tutorial-modal" :data-guide-id="newEnemy.id">
+      <p class="tutorial-eyebrow">第 {{ state.chapterIndex + 1 }} 章新敵人</p>
+      <div class="enemy-tutorial-main">
+        <span
+          class="enemy-tutorial-appearance"
+          :class="{
+            'is-shielded': newEnemy.id === 'affix-shield',
+            'is-fast': newEnemy.id === 'affix-fast',
+            'is-split': newEnemy.id === 'affix-split',
+          }"
+          aria-hidden="true"
+        >
+          <strong>{{ prettyFormula(newEnemy.sample) }}</strong>
+          <span v-if="newEnemy.id === 'affix-shield'" class="enemy-tutorial-shield">
+            <small>護盾式</small>
+            <strong>{{ prettyFormula(newEnemy.sample) }}</strong>
+          </span>
+        </span>
+        <div>
+          <span class="enemy-family-label">{{ newEnemy.label }}</span>
+          <h2 id="enemy-tutorial-title" ref="tutorialHeading" tabindex="-1">{{ newEnemy.name }}</h2>
+          <p id="enemy-tutorial-description">{{ newEnemy.description }}</p>
+        </div>
+      </div>
+      <p id="enemy-tutorial-clue" class="enemy-clue"><strong>判斷提示</strong>{{ newEnemy.clue }}</p>
+      <p class="weapon-tutorial-note">介紹期間整備倒數與三條 Queue 都會暫停；敵人身上不會提示需要幾次運算。</p>
+      <button
+        class="primary-button"
+        type="button"
+        data-action="advance-enemy-tutorial"
+        @click="$emit('advance-enemy-tutorial')"
+      >{{ enemyTutorialAction }} <GameIcon name="arrow" /></button>
+    </article>
+  </div>
+
+  <div
     v-else-if="newWeapon && state.phase === 'preparing'"
     class="overlay weapon-tutorial-overlay"
     role="dialog"
     aria-modal="true"
     aria-labelledby="weapon-tutorial-title"
+    aria-describedby="weapon-tutorial-description"
   >
     <article class="modal weapon-tutorial-modal">
-      <p class="weapon-eyebrow">第 {{ state.chapterIndex + 1 }} 章新軍械</p>
+      <p class="weapon-eyebrow tutorial-eyebrow">第 {{ state.chapterIndex + 1 }} 章新軍械</p>
       <div class="weapon-tutorial-main">
         <span class="weapon-tutorial-art operator-art" :class="newWeapon.art" aria-hidden="true"></span>
         <div>
           <span class="weapon-symbol">{{ newWeapon.symbol }}</span>
-          <h2 id="weapon-tutorial-title">{{ newWeapon.name }}</h2>
-          <p>{{ newWeapon.description }}</p>
+          <h2 id="weapon-tutorial-title" ref="tutorialHeading" tabindex="-1">{{ newWeapon.name }}</h2>
+          <p id="weapon-tutorial-description">{{ newWeapon.description }}</p>
         </div>
       </div>
       <dl class="weapon-facts">
@@ -133,7 +210,7 @@ const weaponSteps = computed(() => {
         type="button"
         data-action="advance-weapon-tutorial"
         @click="$emit('advance-weapon-tutorial')"
-      >{{ state.weaponTutorialQueue.length > 1 ? `下一張（還有 ${state.weaponTutorialQueue.length - 1}）` : '開始整備' }} <GameIcon name="arrow" /></button>
+      >{{ weaponTutorialAction }} <GameIcon name="arrow" /></button>
     </article>
   </div>
 

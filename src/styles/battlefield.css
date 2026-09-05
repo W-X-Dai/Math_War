@@ -231,6 +231,33 @@
   filter: grayscale(0.7) brightness(0.64) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
 }
 
+.tower.is-tutorial-preset {
+  cursor: default;
+  filter: drop-shadow(0 0 9px rgba(127, 211, 179, 0.42)) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
+}
+
+.tower.is-tutorial-preset:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 3px;
+}
+
+.tutorial-preset-badge {
+  position: absolute;
+  z-index: 5;
+  bottom: -12px;
+  left: 50%;
+  width: max-content;
+  padding: 3px 6px;
+  border: 1px solid rgba(127, 211, 179, 0.58);
+  border-radius: 2px;
+  background: rgba(2, 17, 19, 0.94);
+  color: var(--mint);
+  font: 700 clamp(7px, 0.52cqw, 9px) / 1 var(--font-ui);
+  letter-spacing: 0.05em;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
 .tower-slot {
   position: absolute;
   z-index: 4;
@@ -279,9 +306,18 @@
   filter: drop-shadow(0 0 13px rgba(127, 211, 179, 0.8)) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
 }
 
+.tower.is-tutorial-preset.is-configurable,
+.tower.is-tutorial-preset.is-configurable:hover,
+.tower.is-tutorial-preset.is-configurable:focus-visible {
+  cursor: default;
+  filter: drop-shadow(0 0 9px rgba(127, 211, 179, 0.42)) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
+}
+
 .enemy {
-  width: clamp(105px, 15%, 238px);
-  aspect-ratio: 3 / 2;
+  --enemy-expression-max: clamp(112px, 13.5cqw, 214px);
+  width: 44px;
+  height: 44px;
+  overflow: visible;
   cursor: pointer;
   filter: drop-shadow(0 9px 6px rgba(0, 0, 0, 0.56));
   transform: translate(-50%, -50%);
@@ -304,6 +340,11 @@
   filter: brightness(1.35) drop-shadow(0 0 12px rgba(255, 211, 124, 0.92));
 }
 
+.enemy:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
 .enemy-leave-active {
   transition: opacity 320ms ease, transform 320ms ease;
 }
@@ -313,88 +354,166 @@
   transform: translate(-50%, -50%) scale(0.45);
 }
 
-.enemy-sprite {
-  position: absolute;
-  inset: 0;
-  background-repeat: no-repeat;
-}
-
-.enemy-chip {
+.enemy-expression-stack {
   position: absolute;
   top: 50%;
-  left: 82%;
-  display: grid;
-  width: var(--chip-width, clamp(112px, 10.5cqw, 166px));
-  min-height: 62px;
-  padding: 7px 9px;
-  gap: 3px;
-  border: 1px solid var(--brass-dark);
-  border-radius: 2px;
-  background: rgba(3, 20, 22, 0.92);
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.48);
-  /* Only the information chip moves; the enemy sprite remains at its exact
-     simulation position. Dense same-lane chips fan across the available row. */
-  transform: translate(var(--stack-x, 0px), -50%);
+  left: 50%;
+  display: inline-grid;
+  min-width: 56px;
+  max-width: var(--enemy-expression-max);
+  min-height: 40px;
+  grid-template-areas: "expression";
+  align-items: stretch;
+  transform: translate(calc(var(--enemy-anchor-x, -50%) + var(--stack-x, 0px)), -50%);
+  transform-origin: center;
+  transition: transform 140ms ease;
 }
 
-.enemy-badges {
-  display: flex;
+.enemy-body-expression,
+.enemy-shield-expression {
   min-width: 0;
-  gap: 3px;
+  max-width: var(--enemy-expression-max);
+  min-height: 40px;
+  padding: 6px 11px;
+  grid-area: expression;
+  display: grid;
+  place-items: center;
   overflow: hidden;
+  border-radius: 4px;
 }
 
-.enemy-badges small {
-  max-width: 76px;
-  padding: 2px 4px;
-  overflow: hidden;
-  border: 1px solid rgba(127, 211, 179, 0.48);
-  border-radius: 2px;
-  color: var(--mint);
-  font: 700 clamp(7px, 0.55cqw, 9px) / 1.1 var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.enemy-body-expression {
+  border: 1px solid rgba(229, 169, 77, 0.36);
+  background: rgba(2, 17, 19, 0.82);
+  box-shadow: 0 4px 13px rgba(0, 0, 0, 0.44), inset 0 0 12px rgba(229, 169, 77, 0.06);
+  transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease;
 }
 
-.enemy-badges .mutation-badge {
-  border-color: rgba(232, 111, 90, 0.56);
-  color: #ffab98;
+.enemy.has-shield .enemy-body-expression {
+  opacity: 0.24;
+  transform: translate(3px, 3px);
 }
 
-.enemy-badges .mutation-badge.is-shield {
-  border-color: rgba(255, 211, 124, 0.64);
-  color: var(--brass-bright);
+.enemy-shield-expression {
+  position: relative;
+  z-index: 2;
+  border: 2px solid var(--mint);
+  background: #062629;
+  box-shadow:
+    0 0 0 1px rgba(2, 17, 19, 0.92),
+    0 0 15px rgba(127, 211, 179, 0.42),
+    0 6px 14px rgba(0, 0, 0, 0.54),
+    inset 0 0 13px rgba(127, 211, 179, 0.12);
+  color: #e9fff6;
+  transform: translate(-3px, -3px);
 }
 
-.enemy-badges .mutation-badge.is-fast {
-  border-color: rgba(127, 211, 179, 0.64);
-  color: var(--mint);
+.enemy-shield-expression::before {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 8px;
+  border: 1px solid rgba(233, 255, 246, 0.7);
+  background: rgba(127, 211, 179, 0.28);
+  clip-path: polygon(50% 0, 100% 18%, 86% 78%, 50% 100%, 14% 78%, 0 18%);
+  content: "";
 }
 
-.enemy-badges .mutation-badge.is-spent {
-  border-color: rgba(205, 187, 145, 0.34);
-  color: rgba(205, 187, 145, 0.6);
-  text-decoration: line-through;
+.enemy:hover .enemy-body-expression,
+.enemy.is-selected .enemy-body-expression {
+  border-color: var(--brass-bright);
+}
+
+.enemy:hover .enemy-shield-expression,
+.enemy.is-selected .enemy-shield-expression {
+  border-color: #dffff3;
+  box-shadow:
+    0 0 0 1px rgba(2, 17, 19, 0.92),
+    0 0 19px rgba(127, 211, 179, 0.62),
+    0 6px 14px rgba(0, 0, 0, 0.54),
+    inset 0 0 13px rgba(127, 211, 179, 0.16);
+}
+
+.enemy:not(.has-shield):focus-visible .enemy-body-expression,
+.enemy.has-shield:focus-visible .enemy-shield-expression {
+  outline: 3px solid var(--mint);
+  outline-offset: 3px;
 }
 
 .enemy-formula {
+  display: block;
+  max-width: calc(var(--enemy-expression-max) - 22px);
   overflow: hidden;
   color: var(--parchment);
-  font: italic 700 clamp(16px, 1.5cqw, 25px) / 1.05 var(--font-math);
+  font: italic 750 clamp(17px, 1.45cqw, 24px) / 1.08 var(--font-math);
   text-overflow: ellipsis;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.9), 0 0 8px rgba(255, 211, 124, 0.12);
   white-space: nowrap;
 }
 
-.enemy-meta {
+.enemy-formula.is-long {
+  display: -webkit-box;
+  font-size: clamp(12px, 0.9cqw, 14px);
+  line-height: 1.05;
+  text-align: center;
+  text-overflow: clip;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.enemy-formula.is-very-long {
+  font-size: clamp(11px, 0.78cqw, 12.5px);
+}
+
+.enemy-shield-expression .enemy-formula {
+  color: #e9fff6;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.9), 0 0 8px rgba(127, 211, 179, 0.24);
+}
+
+.enemy-mutation-marks {
+  position: absolute;
+  z-index: 4;
+  top: -5px;
+  right: -6px;
   display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 7px;
-  color: var(--parchment-dim);
-  font-size: clamp(9px, 0.72cqw, 12px);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  align-items: flex-start;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.enemy-mutation-mark {
+  position: relative;
+  display: block;
+  width: 10px;
+  height: 11px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.72));
+}
+
+.enemy-mutation-mark.is-fast {
+  background: var(--mint);
+  clip-path: polygon(53% 0, 100% 0, 68% 38%, 94% 38%, 32% 100%, 46% 55%, 16% 55%);
+}
+
+.enemy-mutation-mark.is-split::before,
+.enemy-mutation-mark.is-split::after {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #ffab98;
+  background: #5a211d;
+  content: "";
+}
+
+.enemy-mutation-mark.is-split::before {
+  top: 0;
+  left: 0;
+}
+
+.enemy-mutation-mark.is-split::after {
+  right: 0;
+  bottom: 0;
 }
 
 .damage-value {

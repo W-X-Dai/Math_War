@@ -59,9 +59,6 @@
     left: 15%;
   }
 
-  .enemy-chip {
-    left: 75%;
-  }
 }
 
 @media (max-width: 900px) {
@@ -140,8 +137,12 @@
     display: grid;
     min-height: 0;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: clamp(560px, 75vw, 660px) auto;
+    grid-template-rows: auto auto;
     overflow: hidden;
+  }
+
+  .battle-main {
+    grid-template-rows: clamp(470px, 65vw, 560px) auto clamp(88px, 7.4cqw, 118px);
   }
 
   .battle-stage {
@@ -167,6 +168,34 @@
     right: 4%;
     bottom: 48px;
     left: 15%;
+  }
+
+  .enemy {
+    --enemy-expression-max: clamp(104px, 18vw, 154px);
+  }
+
+  .enemy-expression-stack,
+  .enemy-body-expression,
+  .enemy-shield-expression {
+    min-height: 36px;
+  }
+
+  .enemy-body-expression,
+  .enemy-shield-expression {
+    padding: 4px 8px;
+  }
+
+  .enemy-shield-expression {
+    transform: translate(-2px, -2px);
+  }
+
+  .enemy.has-shield .enemy-body-expression {
+    transform: translate(2px, 2px);
+  }
+
+  .enemy-formula {
+    max-width: calc(var(--enemy-expression-max) - 16px);
+    font-size: clamp(16px, 2.5vw, 20px);
   }
 
   .operator-dock,
@@ -203,11 +232,15 @@
   }
 
   .operator-card {
-    width: 148px;
-    min-width: 148px;
-    height: 146px;
-    padding: 7px;
+    width: 132px;
+    min-width: 132px;
+    height: 104px;
+    padding: 6px;
     scroll-snap-align: none;
+  }
+
+  .operator-empty {
+    min-height: 104px;
   }
 
   .operator-desc {
@@ -228,13 +261,32 @@
   }
 
   .workbench .formula-panel,
-  .battle-layout > .formula-panel {
+  .battle-layout > .formula-panel,
+  .enemy-formula-panel {
     position: relative;
     inset: auto;
     width: 100%;
     min-width: 0;
     max-height: none;
     margin: 0;
+  }
+
+  .enemy-formula-panel {
+    grid-column: 1;
+    grid-row: 2;
+    border-inline: 0;
+    border-radius: 0;
+  }
+
+  .enemy-formula-panel .formula-panel-head .icon-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .derivation-log {
+    grid-column: 1;
+    grid-row: 3;
   }
 
   .bottom-bar {
@@ -272,7 +324,7 @@
   }
 
   .battle-layout {
-    grid-template-rows: 560px auto;
+    grid-template-rows: auto auto;
   }
 
   .operator-dock,
@@ -287,6 +339,39 @@
     right: 2%;
     bottom: 42px;
     left: 12%;
+  }
+
+  .enemy {
+    --enemy-expression-max: clamp(96px, 30vw, 132px);
+  }
+
+  .enemy-expression-stack,
+  .enemy-body-expression,
+  .enemy-shield-expression {
+    min-height: 34px;
+  }
+
+  .enemy-body-expression,
+  .enemy-shield-expression {
+    padding: 3px 7px;
+  }
+
+  .enemy-shield-expression {
+    transform: translate(-1px, -1px);
+  }
+
+  .enemy.has-shield .enemy-body-expression {
+    transform: translate(1px, 1px);
+  }
+
+  .enemy-formula {
+    max-width: calc(var(--enemy-expression-max) - 14px);
+    font-size: clamp(14px, 4.2vw, 17px);
+  }
+
+  .enemy-mutation-marks {
+    top: -3px;
+    right: -4px;
   }
 
   .projectile__glyph,

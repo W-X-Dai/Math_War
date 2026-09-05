@@ -289,6 +289,11 @@
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.bottom-bar.is-tutorial-wave {
+  border-top-color: var(--mint);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(127, 211, 179, 0.12);
+}
+
 .prep-status {
   display: grid;
   min-width: 0;
@@ -346,6 +351,24 @@
 .early-bonus > strong {
   color: var(--brass-bright);
   font-variant-numeric: tabular-nums;
+}
+
+.tutorial-wave-intel .tutorial-wave-badge {
+  flex: 0 0 auto;
+  border-color: rgba(127, 211, 179, 0.58);
+  color: var(--mint);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.tutorial-wave-intel .tutorial-objective {
+  flex: 1 1 auto;
+}
+
+.tutorial-loadout > strong {
+  color: var(--mint);
+  font-size: clamp(11px, 0.82cqw, 14px);
+  white-space: nowrap;
 }
 
 .early-bonus {

@@ -17,6 +17,11 @@ import {
   generateFiniteWave,
   summarizeWave,
 } from '../src/game/level-generator.js';
+import {
+  CHAPTER_TUTORIALS,
+  ENEMY_GUIDES,
+  generateTutorialWave,
+} from '../src/game/tutorial-content.js';
 
 const EXPECTED_BOARDS = [
   [4, 7, 4], [4, 8, 5], [5, 9, 5], [5, 10, 6], [6, 11, 7], [6, 12, 7],
@@ -101,6 +106,52 @@ test('new workshop materials and parameter towers are available', () => {
   }
 });
 
+test('each finite chapter has a fixed, legal and fully introduced tutorial wave', () => {
+  assert.equal(CHAPTER_TUTORIALS.length, CHAPTERS.length);
+  CHAPTER_TUTORIALS.forEach((tutorial, chapterIndex) => {
+    const chapter = CHAPTERS[chapterIndex];
+    const wave = generateTutorialWave(chapterIndex);
+    assert.deepEqual(wave, generateTutorialWave(chapterIndex));
+    assert.equal(wave.kind, 'tutorial');
+    assert.equal(wave.chapterIndex, chapterIndex);
+    assert.equal(wave.objective, tutorial.objective);
+    assertSorted(wave.entries);
+    assert.equal(wave.summary.total, wave.entries.length);
+    assert.equal(wave.summary.danger, '教學');
+    assert.equal(wave.summary.mutationCount, wave.entries.reduce((sum, enemy) => sum + enemy.affixes.length, 0));
+    assert.ok(tutorial.enemyGuideIds.every((id) => ENEMY_GUIDES[id]));
+    assert.ok(tutorial.starterOperators.length <= OPERATOR_QUEUE_CAPACITY);
+    assert.ok(tutorial.presetTowers.length > 0);
+    const availableOperators = [
+      ...tutorial.starterOperators,
+      ...tutorial.presetTowers.map((tower) => tower.typeId),
+    ];
+    for (const tag of wave.requiredTags) {
+      assert.ok(
+        availableOperators.some((id) => OPERATORS[id].counterTags.includes(tag)),
+        `tutorial ${chapterIndex} cannot counter ${tag}`,
+      );
+    }
+
+    for (const tower of tutorial.presetTowers) {
+      assert.ok(OPERATORS[tower.typeId]);
+      assert.ok(tower.row >= 0 && tower.row < chapter.board.rows);
+      assert.ok(tower.column >= 0 && tower.column < chapter.board.placeableColumns);
+    }
+    for (const enemy of wave.entries) {
+      assertEntryShape(enemy);
+      assert.ok(enemy.row >= 0 && enemy.row < chapter.board.rows);
+      assert.ok(tutorial.enemyGuideIds.includes(enemy.family));
+      if (enemy.affixes.includes('fast')) assert.ok(tutorial.enemyGuideIds.includes('affix-fast'));
+      if (enemy.affixes.includes('shield')) assert.ok(tutorial.enemyGuideIds.includes('affix-shield'));
+      if (enemy.affixes.includes('split')) {
+        assert.ok(tutorial.enemyGuideIds.includes('affix-split'));
+        assert.equal(enemy.splitExpressions.length, 2);
+      }
+    }
+  });
+});
+
 test('finite waves are deterministic and satisfy invariants across 500 seeds', () => {
   const uniqueChapterFive = new Set();
   const observedAffixes = new Set();
@@ -110,6 +161,7 @@ test('finite waves are deterministic and satisfy invariants across 500 seeds', (
       const wave = generateFiniteWave(seed, chapterIndex);
       const repeated = generateFiniteWave(seed, chapterIndex);
       assert.deepEqual(wave, repeated);
+      assert.equal(wave.kind, 'challenge');
       assert.equal(wave.chapterIndex, chapterIndex);
       assert.equal(wave.endlessRound, 0);
       assert.ok(wave.entries.length >= chapter.countRange[0]);
@@ -191,6 +243,7 @@ test('endless waves obey entity, expression, lane and mutation constraints', () 
   for (let round = 1; round <= 40; round += 1) {
     const wave = generateEndlessWave(8080, round);
     const difficulty = endlessDifficulty(round);
+    assert.equal(wave.kind, 'endless');
     assert.equal(wave.entries.length, difficulty.count);
     assert.equal(wave.endlessRound, round);
     assertSorted(wave.entries);

@@ -20,6 +20,10 @@
   box-shadow: 0 7px 22px rgba(0, 0, 0, 0.5), 0 0 13px rgba(229, 169, 77, 0.12), inset 0 0 18px rgba(22, 73, 74, 0.14);
 }
 
+.enemy-formula-panel {
+  bottom: calc(clamp(88px, 7.4cqw, 118px) + 10px);
+}
+
 .workbench .formula-panel,
 .battle-layout > .formula-panel {
   position: relative;
@@ -257,12 +261,14 @@
   flex-wrap: wrap;
 }
 
-.weapon-tutorial-modal {
+.weapon-tutorial-modal,
+.enemy-tutorial-modal {
   width: min(100%, 650px);
   padding: clamp(24px, 3.2vw, 40px);
 }
 
-.weapon-eyebrow {
+.weapon-eyebrow,
+.tutorial-eyebrow {
   margin: 0 0 12px;
   color: var(--mint) !important;
   font: 700 0.72rem/1 var(--font-ui);
@@ -353,6 +359,123 @@
   margin-left: auto;
 }
 
+.enemy-tutorial-main {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+}
+
+.enemy-tutorial-appearance {
+  position: relative;
+  display: grid;
+  width: 176px;
+  min-height: 82px;
+  padding: 14px;
+  place-items: center;
+  color: var(--parchment);
+  font: italic 800 clamp(22px, 2.4vw, 34px) / 1 var(--font-math);
+  text-align: center;
+  text-shadow: 0 3px 8px rgba(0, 0, 0, 0.92);
+}
+
+.enemy-tutorial-appearance::before,
+.enemy-tutorial-appearance::after {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: rgba(229, 169, 77, 0.72);
+  content: "";
+}
+
+.enemy-tutorial-appearance::before {
+  top: 0;
+  left: 0;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+
+.enemy-tutorial-appearance::after {
+  right: 0;
+  bottom: 0;
+  border-right: 1px solid;
+  border-bottom: 1px solid;
+}
+
+.enemy-tutorial-appearance.is-fast::after {
+  width: auto;
+  height: auto;
+  border: 0;
+  color: var(--mint);
+  content: "»";
+  font: 800 1.25rem/1 var(--font-math);
+}
+
+.enemy-tutorial-appearance.is-split {
+  text-shadow: 5px 4px 0 rgba(229, 169, 77, 0.22), 0 3px 8px rgba(0, 0, 0, 0.92);
+}
+
+.enemy-tutorial-shield {
+  position: absolute;
+  z-index: 2;
+  inset: 5px -3px -3px 5px;
+  display: grid;
+  padding: 8px 12px;
+  place-content: center;
+  gap: 5px;
+  border: 1px solid var(--mint);
+  background: rgba(3, 29, 31, 0.98);
+  box-shadow: 0 0 16px rgba(127, 211, 179, 0.26), 0 8px 18px rgba(0, 0, 0, 0.5);
+  color: var(--mint);
+}
+
+.enemy-tutorial-shield small {
+  font: 700 0.58rem/1 var(--font-ui);
+  font-style: normal;
+  letter-spacing: 0.12em;
+}
+
+.enemy-family-label {
+  display: inline-block;
+  padding: 3px 7px;
+  border: 1px solid rgba(127, 211, 179, 0.52);
+  color: var(--mint);
+  font: 700 0.7rem/1.1 var(--font-ui);
+  letter-spacing: 0.08em;
+}
+
+.enemy-tutorial-modal h2 {
+  margin: 8px 0 7px;
+  font-size: clamp(29px, 3vw, 42px);
+}
+
+.enemy-tutorial-modal p {
+  margin: 0;
+}
+
+.enemy-clue {
+  display: grid;
+  margin-top: 22px !important;
+  padding: 10px 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  border-left: 2px solid var(--mint);
+  background: rgba(127, 211, 179, 0.06);
+  color: var(--parchment) !important;
+  font-size: 0.82rem;
+}
+
+.enemy-clue strong {
+  color: var(--mint);
+  font-family: var(--font-display);
+  white-space: nowrap;
+}
+
+.enemy-tutorial-modal > .primary-button {
+  margin-top: 18px;
+  margin-left: auto;
+}
+
 @media (max-width: 700px) {
   .weapon-tutorial-main {
     grid-template-columns: 92px minmax(0, 1fr);
@@ -362,6 +485,15 @@
   .weapon-tutorial-art {
     width: 92px;
     height: 78px;
+  }
+
+  .enemy-tutorial-main {
+    grid-template-columns: 118px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .enemy-tutorial-appearance {
+    width: 118px;
   }
 
   .weapon-facts {

@@ -35,6 +35,7 @@ import {
   STORED_CONSTANT_CAPACITY,
 } from './content.js';
 import { generateEndlessWave, generateFiniteWave } from './level-generator.js';
+import { chapterTutorial, generateTutorialWave } from './tutorial-content.js';
 
 const GRID_START = 0.155;
 const GRID_END = 0.89;
@@ -144,11 +145,27 @@ function operatorLabel(id) {
   return OPERATORS[id]?.symbol ?? id;
 }
 
+function hasActiveShield(enemy) {
+  return enemy.shieldExpression !== null && enemy.shieldExpression !== undefined;
+}
+
+export function activeEnemyExpression(enemy) {
+  return hasActiveShield(enemy) ? enemy.shieldExpression : enemy.expression;
+}
+
 function spawnEnemy(state, entry) {
   const legacyEntry = Array.isArray(entry);
   const typeId = legacyEntry ? entry[0] : entry.typeId;
   const row = legacyEntry ? entry[1] : entry.row;
   const type = ENEMY_TYPES[typeId] ?? {};
+  const expression = cloneExpression(entry.expression ?? type.create());
+  const affixes = [...(entry.affixes ?? [])];
+  const shieldSource = affixes.includes('shield')
+    ? (entry.shieldExpression ?? expression)
+    : null;
+  const shieldExpression = shieldSource && !isZero(shieldSource)
+    ? cloneExpression(shieldSource)
+    : null;
   state.enemies.push({
     id: nextId(state, 'enemy'),
     typeId,
@@ -157,11 +174,14 @@ function spawnEnemy(state, entry) {
     family: entry.family ?? 'polynomial',
     row,
     position: 0.955,
-    expression: cloneExpression(entry.expression ?? type.create()),
+    expression,
     speed: entry.speed ?? type.speed,
     reward: entry.reward ?? type.reward,
-    affixes: [...(entry.affixes ?? [])],
-    shieldActive: (entry.affixes ?? []).includes('shield'),
+    affixes,
+    shieldExpression,
+    // Kept as a synchronized compatibility mirror while presentation code
+    // migrates to the expression itself as the authoritative shield state.
+    shieldActive: shieldExpression !== null,
     splitExpressions: (entry.splitExpressions ?? []).map(cloneExpression),
     attackTimer: 0,
     divergentTimer: 0,
@@ -184,6 +204,7 @@ function spawnSplitChildren(state, enemy) {
       speed: enemy.speed * 1.05,
       reward: Math.max(8, Math.ceil(enemy.reward * 0.35)),
       affixes: [],
+      shieldExpression: null,
       shieldActive: false,
       splitExpressions: [],
       attackTimer: 0.35 + index * 0.12,
@@ -221,21 +242,39 @@ function finishEnemy(state, enemy, reason) {
 }
 
 function transformEnemy(state, enemy, nextExpression, source, previousText) {
-  if (enemy.shieldActive) {
-    enemy.shieldActive = false;
+  const nextText = formatExpression(nextExpression);
+  if (hasActiveShield(enemy)) {
     enemy.hitFlash = 0.32;
+    if (!isZero(nextExpression)) {
+      enemy.shieldExpression = nextExpression;
+      enemy.shieldActive = true;
+      addEffect(state, {
+        type: 'operator',
+        row: enemy.row,
+        position: enemy.position,
+        label: operatorLabel(source),
+        equation: `${previousText} → ${nextText}`,
+        layer: 'shield',
+      });
+      addLog(state, `護盾 ${operatorLabel(source)}　${previousText} → ${nextText}`);
+      return true;
+    }
+
+    enemy.shieldExpression = null;
+    enemy.shieldActive = false;
     addEffect(state, {
       type: 'shield',
       row: enemy.row,
       position: enemy.position,
       label: '護盾破裂',
+      equation: `${previousText} → ${nextText}`,
     });
-    addLog(state, `${operatorLabel(source)}　被等式護盾抵銷`, 'danger');
-    return false;
+    addLog(state, `護盾 ${operatorLabel(source)}　${previousText} → 0　破除！`, 'success');
+    return true;
   }
+
   enemy.expression = nextExpression;
   enemy.hitFlash = 0.32;
-  const nextText = formatExpression(nextExpression);
   addEffect(state, {
     type: 'operator',
     row: enemy.row,
@@ -323,14 +362,17 @@ function resolveProjectileImpact(state, effect, enemy, frameDt) {
   effect.impactResolved = true;
   effect.progress = 1;
   effect.impactIn = 0;
+  // updateTransientState subtracts this frame immediately after resolution;
+  // include it so even a long or 2× frame still renders the full hit pulse.
   effect.ttl = PROJECTILE_IMPACT_LINGER + frameDt;
   effect.row = enemy.row;
   effect.position = enemy.position;
 
-  const previousText = formatExpression(enemy.expression);
+  const targetExpression = activeEnemyExpression(enemy);
+  const previousText = formatExpression(targetExpression);
   let outcome;
   try {
-    outcome = evaluateOperatorOutcome(effect.operatorId, enemy.expression, effect);
+    outcome = evaluateOperatorOutcome(effect.operatorId, targetExpression, effect);
   } catch (error) {
     reportOperatorError(state, effect.operatorId, previousText, error, effect.sourceTowerId);
     return;
@@ -359,11 +401,6 @@ function resolveProjectileImpact(state, effect, enemy, frameDt) {
     return;
   }
 
-  if (enemy.shieldActive) {
-    transformEnemy(state, enemy, cloneExpression(enemy.expression), effect.operatorId, previousText);
-    return;
-  }
-
   enemy.divergentTimer = 6;
   enemy.hitFlash = 0.4;
   addEffect(state, {
@@ -378,7 +415,8 @@ function resolveProjectileImpact(state, effect, enemy, frameDt) {
 }
 
 function attackEnemy(state, tower, enemy) {
-  const previousText = formatExpression(enemy.expression);
+  const targetExpression = activeEnemyExpression(enemy);
+  const previousText = formatExpression(targetExpression);
   const details = {
     parameter: tower.parameter,
     lowerBound: tower.lowerBound,
@@ -386,9 +424,9 @@ function attackEnemy(state, tower, enemy) {
   };
 
   try {
-    // Preflight invalid operators without mutating the target. The live
-    // expression is evaluated again when the projectile actually arrives.
-    evaluateOperatorOutcome(tower.typeId, enemy.expression, details);
+    // Preflight keeps invalid towers from firing, but the result is discarded.
+    // The live expression is evaluated again when the projectile actually hits.
+    evaluateOperatorOutcome(tower.typeId, targetExpression, details);
   } catch (error) {
     reportOperatorError(state, tower.typeId, previousText, error, tower.id);
     return false;
@@ -404,7 +442,7 @@ function nearestEnemyInLane(state, tower) {
       !enemy.dead
       && enemy.row === tower.row
       && enemy.position >= tower.position - 0.035
-      && (tower.typeId !== 'eulerTower' || isEulerCompatible(enemy.expression))
+      && (tower.typeId !== 'eulerTower' || isEulerCompatible(activeEnemyExpression(enemy)))
     ))
     .sort((a, b) => a.position - b.position)[0] ?? null;
 }
@@ -529,6 +567,9 @@ function updateProjectileImpacts(state, dt) {
       continue;
     }
 
+    // Resolve events chronologically inside a long frame. If this enemy reaches
+    // the proof core before this projectile would arrive, the shot is a miss;
+    // updateEnemies will settle the body damage later in the same tick.
     const baseIn = timeUntilBase(state, target);
     if (baseIn <= dt + 1e-9 && baseIn + 1e-9 < effect.impactIn) {
       effect.status = 'missed';
@@ -552,6 +593,8 @@ function updateTransientState(state, dt) {
   for (const tower of state.towers) {
     tower.fireFlash = Math.max(0, tower.fireFlash - dt);
   }
+  // Age existing enemy timers before resolving this frame's hits so a newly
+  // applied hit flash or six-second divergence receives its full duration.
   for (const enemy of state.enemies) {
     enemy.attackTimer = Math.max(0, enemy.attackTimer - dt);
     enemy.divergentTimer = Math.max(0, enemy.divergentTimer - dt);
@@ -605,8 +648,13 @@ function clearProjectiles(state) {
 }
 
 function checkWaveState(state) {
+  const wave = state.currentWave;
   if (state.baseHp <= 0) {
     clearProjectiles(state);
+    if (wave?.kind === 'tutorial') {
+      restartTutorialWave(state);
+      return;
+    }
     state.phase = 'lost';
     state.selectedOperator = null;
     state.selectedOperatorItemId = null;
@@ -615,16 +663,21 @@ function checkWaveState(state) {
     return;
   }
 
-  const wave = state.currentWave;
   const allSpawned = state.nextSpawnIndex >= wave.entries.length;
   const noneAlive = !state.enemies.some((enemy) => !enemy.dead);
   if (!allSpawned || !noneAlive) return;
-  // Preserve the contact frame long enough for the final impact pulse to render.
+  // Let Vue render the final glyph at contact and finish its short hit pulse
+  // before configureWave clears effects for the next chapter or tutorial.
   if (state.effects.some((effect) => (
     effect.type === 'projectile' && effect.status === 'impacted'
   ))) return;
   state.enemies = state.enemies.filter((enemy) => !enemy.dead);
   clearProjectiles(state);
+
+  if (wave.kind === 'tutorial') {
+    prepareFiniteChallenge(state);
+    return;
+  }
 
   if (state.chapterIndex < CHAPTERS.length - 1) {
     const completedName = CHAPTERS[state.chapterIndex].name;
@@ -668,23 +721,49 @@ function chapterConfig(index) {
 }
 
 export function chapterWeaponTutorials(chapterIndex) {
-  if (chapterIndex <= 0 || chapterIndex >= CHAPTERS.length) return [];
+  if (chapterIndex < 0 || chapterIndex >= CHAPTERS.length) return [];
   return OPERATOR_ORDER.filter((operatorId) => OPERATORS[operatorId]?.unlockChapter === chapterIndex);
 }
 
-function resetForChapter(state, chapterIndex) {
-  const config = chapterConfig(chapterIndex);
-  state.chapterIndex = chapterIndex;
-  state.waveIndex = chapterIndex;
-  state.endlessRound = chapterIndex >= CHAPTERS.length ? 1 : 0;
-  state.board = { ...config.board };
+export function chapterEnemyTutorials(chapterIndex) {
+  if (chapterIndex < 0 || chapterIndex >= CHAPTERS.length) return [];
+  return [...chapterTutorial(chapterIndex).enemyGuideIds];
+}
+
+function towerHp(typeId) {
+  if (typeId === 'definiteIntegralTower') return 180;
+  if (['secondDerivative', 'resonanceTower', 'eulerTower'].includes(typeId)) return 150;
+  return 120;
+}
+
+function createPresetTower(state, spec) {
+  const configurable = ['subtract', 'evaluateTower', 'eulerTower', 'resonanceTower'].includes(spec.typeId);
+  const hp = towerHp(spec.typeId);
+  return {
+    id: nextId(state, 'tutorial-tower'),
+    typeId: spec.typeId,
+    row: spec.row,
+    column: spec.column,
+    position: towerPosition(spec.column, state.board),
+    hp,
+    maxHp: hp,
+    cooldown: 0.25,
+    fireFlash: 0,
+    active: true,
+    parameter: configurable ? (spec.parameter ?? null) : undefined,
+    lowerBound: spec.typeId === 'definiteIntegralTower' ? (spec.lowerBound ?? null) : undefined,
+    upperBound: spec.typeId === 'definiteIntegralTower' ? (spec.upperBound ?? null) : undefined,
+    tutorialPreset: true,
+  };
+}
+
+function configureWave(state, config, supply, wave, presetTowers = []) {
   state.energy = config.startingEnergy;
-  state.towers = [];
   state.enemies = [];
   state.effects = [];
-  state.operatorQueue = queueItems(state, 'operator', config.starterOperators, 'operatorId');
-  state.formulaQueue = queueItems(state, 'formula', config.starterFormulaIds, 'cardId');
-  state.constantQueue = queueItems(state, 'constant', config.starterConstants, 'value');
+  state.operatorQueue = queueItems(state, 'operator', supply.starterOperators, 'operatorId');
+  state.formulaQueue = queueItems(state, 'formula', supply.starterFormulaIds, 'cardId');
+  state.constantQueue = queueItems(state, 'constant', supply.starterConstants, 'value');
   state.operatorCooldown = OPERATOR_QUEUE_INTERVAL;
   state.formulaCooldown = FORMULA_QUEUE_INTERVAL;
   state.constantCooldown = CONSTANT_QUEUE_INTERVAL;
@@ -699,18 +778,81 @@ function resetForChapter(state, chapterIndex) {
   }
   state.partialConfirmOpen = false;
   state.partialUsed = false;
-  state.weaponTutorialQueue = chapterWeaponTutorials(chapterIndex);
   state.energyClock = 0;
   state.chain = 0;
   state.waveClock = 0;
   state.nextSpawnIndex = 0;
   state.prepDuration = 30;
   state.prepRemaining = 30;
-  state.currentWave = chapterIndex < CHAPTERS.length
-    ? generateFiniteWave(state.runSeed, chapterIndex)
-    : generateEndlessWave(state.runSeed, 1);
+  state.currentWave = wave;
   state.phase = 'preparing';
   state.bannerTimer = 2.6;
+  state.towers = presetTowers.map((tower) => createPresetTower(state, tower));
+}
+
+function snapshotTutorialState(state) {
+  return {
+    baseHp: state.baseHp,
+    kills: state.kills,
+    maxChain: state.maxChain,
+    rngState: state.rngState,
+    storedConstants: state.storedConstants.map((item) => ({ ...item })),
+    selectedStoredConstantId: state.selectedStoredConstantId,
+  };
+}
+
+function restoreTutorialState(state) {
+  const snapshot = state.tutorialSnapshot;
+  if (!snapshot) return;
+  state.baseHp = snapshot.baseHp;
+  state.kills = snapshot.kills;
+  state.maxChain = snapshot.maxChain;
+  state.rngState = snapshot.rngState;
+  state.storedConstants = snapshot.storedConstants.map((item) => ({ ...item }));
+  state.selectedStoredConstantId = snapshot.selectedStoredConstantId;
+}
+
+function setupTutorialWave(state, chapterIndex, showIntroductions) {
+  const config = CHAPTERS[chapterIndex];
+  const tutorial = chapterTutorial(chapterIndex);
+  configureWave(state, config, tutorial, generateTutorialWave(chapterIndex), tutorial.presetTowers);
+  state.enemyTutorialQueue = showIntroductions ? chapterEnemyTutorials(chapterIndex) : [];
+  state.weaponTutorialQueue = showIntroductions ? chapterWeaponTutorials(chapterIndex) : [];
+}
+
+function restartTutorialWave(state) {
+  restoreTutorialState(state);
+  setupTutorialWave(state, state.chapterIndex, false);
+  addLog(state, '教學核心歸零；固定演練已重置，不會扣除正式關卡資源。', 'danger');
+  notify(state, '教學波已重置，再試一次。', 'neutral');
+}
+
+function prepareFiniteChallenge(state) {
+  const completedTutorial = state.currentWave.name;
+  restoreTutorialState(state);
+  const config = CHAPTERS[state.chapterIndex];
+  configureWave(state, config, config, generateFiniteWave(state.runSeed, state.chapterIndex));
+  state.enemyTutorialQueue = [];
+  state.weaponTutorialQueue = [];
+  state.tutorialSnapshot = null;
+  addLog(state, `${completedTutorial}完成；正式隨機波整備開始。`, 'success');
+}
+
+function resetForChapter(state, chapterIndex) {
+  const config = chapterConfig(chapterIndex);
+  state.chapterIndex = chapterIndex;
+  state.waveIndex = chapterIndex;
+  state.endlessRound = chapterIndex >= CHAPTERS.length ? 1 : 0;
+  state.board = { ...config.board };
+  if (chapterIndex < CHAPTERS.length) {
+    state.tutorialSnapshot = snapshotTutorialState(state);
+    setupTutorialWave(state, chapterIndex, true);
+    return;
+  }
+  state.tutorialSnapshot = null;
+  state.enemyTutorialQueue = [];
+  state.weaponTutorialQueue = [];
+  configureWave(state, config, config, generateEndlessWave(state.runSeed, 1));
 }
 
 export function createGame(seed = 20260905) {
@@ -755,7 +897,9 @@ export function createGame(seed = 20260905) {
     partialConfirmOpen: false,
     partialUsed: false,
     tutorialVisible: true,
+    enemyTutorialQueue: [],
     weaponTutorialQueue: [],
+    tutorialSnapshot: null,
     bannerTimer: 0,
     toast: '',
     toastTone: 'neutral',
@@ -777,13 +921,15 @@ export function startGame(state) {
   if (state.phase !== 'intro') return false;
   state.phase = 'preparing';
   state.tutorialVisible = true;
-  addLog(state, '整備開始：從軍械 queue 選牌並配置防線。', 'success');
+  addLog(state, '第 1 章教學開始：先認識新敵人與固定教具。', 'success');
   return true;
 }
 
 function beginWave(state, awardEarly) {
   if (state.phase !== 'preparing') return false;
-  const bonusSeconds = awardEarly ? Math.ceil(Math.max(0, state.prepRemaining)) : 0;
+  const bonusSeconds = awardEarly && state.currentWave.kind !== 'tutorial'
+    ? Math.ceil(Math.max(0, state.prepRemaining))
+    : 0;
   const bonus = Math.min(150, bonusSeconds * 5);
   if (bonus > 0) {
     state.energy += bonus;
@@ -803,8 +949,8 @@ function beginWave(state, awardEarly) {
 }
 
 export function startWave(state) {
-  if (state.weaponTutorialQueue.length > 0) {
-    notify(state, '先看完本章新軍械教學。', 'danger');
+  if (state.enemyTutorialQueue.length > 0 || state.weaponTutorialQueue.length > 0) {
+    notify(state, '先看完本章敵人與軍械教學。', 'danger');
     return false;
   }
   return beginWave(state, true);
@@ -816,7 +962,7 @@ export function tick(state, rawDt) {
   updateTransientState(state, dt);
 
   if (state.phase === 'preparing') {
-    if (state.weaponTutorialQueue.length > 0) return;
+    if (state.enemyTutorialQueue.length > 0 || state.weaponTutorialQueue.length > 0) return;
     updateQueues(state, dt);
     state.prepRemaining = Math.max(0, state.prepRemaining - dt);
     if (state.prepRemaining <= 0) beginWave(state, false);
@@ -824,8 +970,8 @@ export function tick(state, rawDt) {
   }
   if (state.phase !== 'running') return;
 
-  // A final hit can keep its visual pulse alive briefly. Do not advance
-  // resources, queues, or RNG during this visual-only interval.
+  // A final hit may keep its impact pulse alive briefly. During that visual-only
+  // linger, do not advance combat clocks, refill queues, or consume RNG.
   if (
     state.nextSpawnIndex >= state.currentWave.entries.length
     && !state.enemies.some((enemy) => !enemy.dead)
@@ -981,6 +1127,10 @@ export function toggleTower(state, towerId) {
 export function discardTower(state, towerId) {
   const tower = state.towers.find((candidate) => candidate.id === towerId);
   if (!tower) return false;
+  if (tower.tutorialPreset) {
+    notify(state, '教學預置砲台不能丟棄。', 'neutral');
+    return false;
+  }
   state.towers = state.towers.filter((candidate) => candidate.id !== towerId);
   addLog(state, `拆除 ${OPERATORS[tower.typeId].name}（算力不退還）`, 'danger');
   notify(state, '砲台已丟棄，算力不退還。', 'neutral');
@@ -1002,7 +1152,8 @@ export function applyTargetOperator(state, enemyId) {
   ));
   if (!operator || operatorItem?.operatorId !== operatorId || !enemy || state.energy < operator.cost) return false;
 
-  const before = formatExpression(enemy.expression);
+  const targetExpression = activeEnemyExpression(enemy);
+  const before = formatExpression(targetExpression);
   const details = {};
   const previousRngState = state.rngState;
 
@@ -1011,7 +1162,9 @@ export function applyTargetOperator(state, enemyId) {
       const index = Math.floor(seededRandom(state) * INTEGRATION_CONSTANTS.length);
       details.integrationConstant = INTEGRATION_CONSTANTS[index];
     }
-    evaluateOperatorOutcome(operatorId, enemy.expression, details);
+    // Validate before consuming the card. The actual operation is recalculated
+    // against the active enemy layer only after the falling glyph makes contact.
+    evaluateOperatorOutcome(operatorId, targetExpression, details);
   } catch (error) {
     state.rngState = previousRngState;
     const reason = error instanceof Error ? error.message : '定義域錯誤';
@@ -1063,16 +1216,19 @@ export function partialPreview(state) {
   return state.enemies.filter((enemy) => (
     !enemy.dead && enemy.position > BASE_POSITION
   )).map((enemy) => {
-    const after = enemy.shieldActive
-      ? cloneExpression(enemy.expression)
-      : differentiate(enemy.expression, 'x', 1);
+    const shielded = hasActiveShield(enemy);
+    const beforeExpression = activeEnemyExpression(enemy);
+    const after = differentiate(beforeExpression, 'x', 1);
+    const reachesZero = isZero(after);
     return {
       id: enemy.id,
-      before: formatExpression(enemy.expression),
+      before: formatExpression(beforeExpression),
       after: formatExpression(after),
-      dies: isZero(after),
-      shielded: enemy.shieldActive,
-      damageBefore: damage(enemy.expression),
+      dies: !shielded && reachesZero,
+      shielded,
+      breaksShield: shielded && reachesZero,
+      layer: shielded ? 'shield' : 'body',
+      damageBefore: damage(beforeExpression),
       damageAfter: damage(after),
     };
   });
@@ -1089,6 +1245,15 @@ export function advanceWeaponTutorial(state) {
   state.weaponTutorialQueue.shift();
   if (state.weaponTutorialQueue.length === 0) {
     addLog(state, '新軍械教學完成；整備倒數開始。', 'success');
+  }
+  return true;
+}
+
+export function advanceEnemyTutorial(state) {
+  if (state.phase !== 'preparing' || state.enemyTutorialQueue.length === 0) return false;
+  state.enemyTutorialQueue.shift();
+  if (state.enemyTutorialQueue.length === 0) {
+    addLog(state, '新敵人介紹完成；接著確認本章新軍械。', 'success');
   }
   return true;
 }

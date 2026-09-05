@@ -9,11 +9,16 @@ import {
   trigonometric,
 } from '../src/domain/expression.js';
 import {
+  activeEnemyExpression,
+  advanceEnemyTutorial,
   advanceWeaponTutorial,
   applyTargetOperator,
+  chapterEnemyTutorials,
   chapterWeaponTutorials,
   confirmPartial,
   createGame,
+  discardTower,
+  enemyThreat,
   currentAssembly,
   discardArsenalItem,
   discardConstantItem,
@@ -42,6 +47,8 @@ import {
   OPERATORS,
   STORED_CONSTANT_CAPACITY,
 } from '../src/game/content.js';
+import { CHAPTER_TUTORIALS, generateTutorialWave } from '../src/game/tutorial-content.js';
+import { generateFiniteWave } from '../src/game/level-generator.js';
 
 const term = (coefficient, xPower = 0, yPower = 0) => ({ coefficient, xPower, yPower });
 
@@ -49,7 +56,7 @@ function testEnemy(expression, overrides = {}) {
   return {
     id: overrides.id ?? 'enemy-test', typeId: 'procedural-test', name: '測試函數',
     art: 'enemy-art-polynomial', family: 'polynomial', row: 0, position: 0.72,
-    expression, speed: 0.01, reward: 40, affixes: [], shieldActive: false,
+    expression, speed: 0.01, reward: 40, affixes: [], shieldExpression: null, shieldActive: false,
     splitExpressions: [], attackTimer: 99, divergentTimer: 0, hitFlash: 0,
     ...overrides,
   };
@@ -101,31 +108,59 @@ function assertProjectile(effect, operatorId, expected = {}) {
   for (const [key, value] of Object.entries(expected)) assert.equal(effect[key], value);
 }
 
-test('a seeded game starts with deterministic content and an eight-card arsenal', () => {
+function dismissIntroductions(state) {
+  while (state.enemyTutorialQueue.length > 0) assert.equal(advanceEnemyTutorial(state), true);
+  while (state.weaponTutorialQueue.length > 0) assert.equal(advanceWeaponTutorial(state), true);
+}
+
+test('a seeded game starts with the deterministic chapter tutorial and fixed loadout', () => {
   const first = createGame(12345);
   const replay = createGame(12345);
   assert.equal(first.phase, 'intro');
   assert.equal(first.runSeed, 12345);
   assert.deepEqual(first.currentWave, replay.currentWave);
+  assert.equal(first.currentWave.kind, 'tutorial');
+  assert.deepEqual(first.currentWave, generateTutorialWave(0));
   assert.deepEqual(first.board, { rows: 4, columns: 7, placeableColumns: 4 });
   assert.equal(first.operatorQueue.length, OPERATOR_QUEUE_CAPACITY);
-  assert.deepEqual(first.operatorQueue.map((item) => item.operatorId), CHAPTERS[0].starterOperators);
+  assert.deepEqual(first.operatorQueue.map((item) => item.operatorId), CHAPTER_TUTORIALS[0].starterOperators);
+  assert.equal(first.towers.length, CHAPTER_TUTORIALS[0].presetTowers.length);
+  assert.ok(first.towers.every((tower) => tower.tutorialPreset));
+  const presetTowerCount = first.towers.length;
+  assert.equal(discardTower(first, first.towers[0].id), false);
+  assert.equal(first.towers.length, presetTowerCount);
 });
 
-test('preparation starts early for five energy per displayed second', () => {
+test('tutorial preparation starts without an early-start bonus', () => {
   const state = createGame(10);
   assert.equal(startGame(state), true);
+  dismissIntroductions(state);
   tick(state, 0.2);
   const before = state.energy;
   assert.equal(startWave(state), true);
   assert.equal(state.phase, 'running');
-  assert.equal(state.energy, before + 150);
+  assert.equal(state.energy, before);
   assert.equal(state.prepRemaining, 0);
+});
+
+test('formal challenge preparation awards five energy per displayed second', () => {
+  const state = createGame(101);
+  startGame(state);
+  dismissIntroductions(state);
+  state.phase = 'running';
+  state.currentWave = { ...state.currentWave, entries: [] };
+  state.nextSpawnIndex = 0;
+  tick(state, 0.01);
+  const before = state.energy;
+  assert.equal(state.currentWave.kind, 'challenge');
+  assert.equal(startWave(state), true);
+  assert.equal(state.energy, before + 150);
 });
 
 test('preparation auto-starts without bonus and pause freezes its clock', () => {
   const state = createGame(11);
   startGame(state);
+  dismissIntroductions(state);
   state.prepRemaining = 0.1;
   const before = state.energy;
   assert.equal(togglePause(state), true);
@@ -137,22 +172,22 @@ test('preparation auto-starts without bonus and pause freezes its clock', () => 
   assert.equal(state.energy, before);
 });
 
-test('new chapter weapons pause preparation until their tutorials are read', () => {
-  assert.deepEqual(chapterWeaponTutorials(0), []);
+test('new enemies and weapons pause preparation until their introductions are read', () => {
+  assert.deepEqual(chapterWeaponTutorials(0), ['derivative', 'subtract']);
   assert.deepEqual(chapterWeaponTutorials(1), ['secondDerivative', 'integral']);
   assert.deepEqual(chapterWeaponTutorials(2), ['definiteIntegralTower']);
   assert.deepEqual(chapterWeaponTutorials(3), ['partial', 'evaluateTower']);
   assert.deepEqual(chapterWeaponTutorials(4), ['limit', 'eulerTower']);
   assert.deepEqual(chapterWeaponTutorials(5), ['reflect', 'resonanceTower']);
   assert.deepEqual(chapterWeaponTutorials(CHAPTERS.length), []);
+  assert.deepEqual(chapterEnemyTutorials(0), ['polynomial', 'affix-fast']);
+  assert.deepEqual(chapterEnemyTutorials(4), ['rational', 'logarithmic', 'affix-split']);
+  assert.deepEqual(chapterEnemyTutorials(CHAPTERS.length), []);
 
   const state = createGame(111);
-  state.phase = 'running';
-  state.currentWave = { ...state.currentWave, entries: [] };
-  state.nextSpawnIndex = 0;
-  tick(state, 0.01);
-  assert.equal(state.chapterIndex, 1);
-  assert.deepEqual(state.weaponTutorialQueue, ['secondDerivative', 'integral']);
+  startGame(state);
+  assert.deepEqual(state.enemyTutorialQueue, ['polynomial', 'affix-fast']);
+  assert.deepEqual(state.weaponTutorialQueue, ['derivative', 'subtract']);
 
   const prepBefore = state.prepRemaining;
   const formulaCooldownBefore = state.formulaCooldown;
@@ -161,12 +196,56 @@ test('new chapter weapons pause preparation until their tutorials are read', () 
   assert.equal(state.formulaCooldown, formulaCooldownBefore);
   assert.equal(startWave(state), false);
 
+  assert.equal(advanceEnemyTutorial(state), true);
+  assert.deepEqual(state.enemyTutorialQueue, ['affix-fast']);
+  assert.equal(advanceEnemyTutorial(state), true);
+  assert.deepEqual(state.enemyTutorialQueue, []);
   assert.equal(advanceWeaponTutorial(state), true);
-  assert.deepEqual(state.weaponTutorialQueue, ['integral']);
+  assert.deepEqual(state.weaponTutorialQueue, ['subtract']);
   assert.equal(advanceWeaponTutorial(state), true);
   assert.deepEqual(state.weaponTutorialQueue, []);
   tick(state, 0.2);
   assert.ok(state.prepRemaining < prepBefore);
+});
+
+test('clearing a tutorial wave restores sandbox state and opens the seeded challenge', () => {
+  const state = createGame(112);
+  startGame(state);
+  dismissIntroductions(state);
+  state.phase = 'running';
+  state.currentWave = { ...state.currentWave, entries: [] };
+  state.nextSpawnIndex = 0;
+  state.baseHp = 410;
+  state.energy = 1;
+  state.kills = 9;
+  state.maxChain = 9;
+  tick(state, 0.01);
+
+  assert.equal(state.chapterIndex, 0);
+  assert.equal(state.currentWave.kind, 'challenge');
+  assert.equal(state.phase, 'preparing');
+  assert.equal(state.baseHp, 500);
+  assert.equal(state.energy, CHAPTERS[0].startingEnergy);
+  assert.equal(state.kills, 0);
+  assert.equal(state.maxChain, 0);
+  assert.equal(state.towers.length, 0);
+  assert.deepEqual(state.operatorQueue.map((item) => item.operatorId), CHAPTERS[0].starterOperators);
+  assert.deepEqual(state.currentWave, generateFiniteWave(112, 0));
+});
+
+test('losing a tutorial wave restarts its sandbox instead of ending the run', () => {
+  const state = createGame(113);
+  startGame(state);
+  dismissIntroductions(state);
+  state.phase = 'running';
+  state.baseHp = 0;
+  tick(state, 0.01);
+  assert.equal(state.phase, 'preparing');
+  assert.equal(state.baseHp, 500);
+  assert.equal(state.currentWave.kind, 'tutorial');
+  assert.equal(state.enemyTutorialQueue.length, 0);
+  assert.equal(state.weaponTutorialQueue.length, 0);
+  assert.ok(state.towers.every((tower) => tower.tutorialPreset));
 });
 
 test('placing a tower consumes one matching card and its energy cost', () => {
@@ -192,17 +271,21 @@ test('failed arsenal selection keeps both card and energy', () => {
   assert.equal(state.energy, 0);
 });
 
-test('an enemy damages the base once and leaves without a kill reward', () => {
+test('a shielded enemy uses its body damage at the base and leaves without a kill reward', () => {
   const state = createGame(131);
   freezeSpawns(state);
   const leakingEnemy = testEnemy(polynomial(12), {
     position: 0.12,
     attackTimer: 99,
     reward: 80,
+    affixes: ['shield'],
+    shieldExpression: polynomial(99),
+    shieldActive: true,
   });
   state.enemies.push(leakingEnemy);
   const energyBefore = state.energy;
 
+  assert.equal(enemyThreat(leakingEnemy), 12);
   tick(state, 0.05);
   assert.equal(state.baseHp, 488);
   assert.equal(state.enemies.length, 0);
@@ -226,8 +309,9 @@ test('non-leading formula and constant cards assemble and install', () => {
   assert.equal(state.storedConstants[0].value, 4);
   assert.equal(selectArsenalItem(state, subtractCard.id), true);
   assert.equal(placeTower(state, 0, 0), true);
-  assert.equal(installAssembly(state, state.towers[0].id), true);
-  assert.equal(state.towers[0].parameter, 4);
+  const placedTower = state.towers.find((tower) => tower.typeId === 'subtract' && !tower.tutorialPreset);
+  assert.equal(installAssembly(state, placedTower.id), true);
+  assert.equal(placedTower.parameter, 4);
   assert.equal(state.storedConstants.length, 0);
   assert.equal(state.formulaQueue.some((item) => item.id === formula.id), false);
   assert.equal(state.constantQueue.some((item) => item.id === constant.id), false);
@@ -284,6 +368,7 @@ test('any stored constant can be selected, discarded, or consumed by a tower', (
 test('all three queues refill during preparation and respect capacity', () => {
   const state = createGame(15);
   startGame(state);
+  dismissIntroductions(state);
   state.operatorQueue.pop();
   state.formulaQueue.pop();
   state.constantQueue.pop();
@@ -312,7 +397,7 @@ test('any arsenal, formula, or constant item can be discarded', () => {
 test('chapter completion repairs HP and resets map, economy, towers, and queues', () => {
   const state = createGame(17);
   state.phase = 'running';
-  state.currentWave = { ...state.currentWave, entries: [] };
+  state.currentWave = { ...state.currentWave, kind: 'challenge', entries: [] };
   state.nextSpawnIndex = 0;
   state.baseHp = 350;
   state.energy = 1;
@@ -325,8 +410,11 @@ test('chapter completion repairs HP and resets map, economy, towers, and queues'
   assert.equal(state.baseHp, 450);
   assert.equal(state.energy, CHAPTERS[1].startingEnergy);
   assert.deepEqual(state.board, CHAPTERS[1].board);
-  assert.equal(state.towers.length, 0);
-  assert.deepEqual(state.operatorQueue.map((item) => item.operatorId), CHAPTERS[1].starterOperators);
+  assert.equal(state.towers.length, CHAPTER_TUTORIALS[1].presetTowers.length);
+  assert.ok(state.towers.every((tower) => tower.tutorialPreset));
+  assert.equal(state.currentWave.kind, 'tutorial');
+  assert.deepEqual(state.operatorQueue.map((item) => item.operatorId), CHAPTER_TUTORIALS[1].starterOperators);
+  assert.deepEqual(state.enemyTutorialQueue, ['constant']);
   assert.deepEqual(state.storedConstants, [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }]);
   assert.equal(state.selectedStoredConstantId, 'persistent-constant');
 });
@@ -336,7 +424,7 @@ test('entering endless resets once, then later rounds preserve the defense', () 
   state.chapterIndex = CHAPTERS.length - 1;
   state.waveIndex = state.chapterIndex;
   state.phase = 'running';
-  state.currentWave = { ...state.currentWave, entries: [] };
+  state.currentWave = { ...state.currentWave, kind: 'challenge', entries: [] };
   state.nextSpawnIndex = 0;
   state.baseHp = 300;
   state.storedConstants = [{ id: 'endless-constant', value: Math.PI, source: 'k｜k=π' }];
@@ -384,147 +472,6 @@ test('new parameter towers apply their mathematical operators', async (t) => {
       advanceBy(state, projectile.impactIn + 0.001);
       assert.equal(state.enemies.length, 0);
     });
-  }
-});
-
-test('evaluation at a singularity pauses the tower without changing the enemy', () => {
-  const state = createGame(23);
-  freezeSpawns(state);
-  const target = testEnemy(polynomial([term(1, -1)]));
-  const tower = configuredTower('evaluateTower', 0);
-  state.enemies.push(target);
-  state.towers.push(tower);
-  tick(state, 0.01);
-  assert.equal(tower.active, false);
-  assert.equal(formatExpression(target.expression), 'x^-1');
-});
-
-test('a shield blocks one global transform while consuming its card', () => {
-  const state = createGame(24);
-  state.chapterIndex = 3;
-  freezeSpawns(state);
-  const cardId = addArsenalCard(state, 'partial');
-  const target = testEnemy(polynomial([term(1, 2)]), { affixes: ['shield'], shieldActive: true });
-  state.enemies.push(target);
-  const energyBefore = state.energy;
-  assert.equal(selectArsenalItem(state, cardId), true);
-  assert.equal(partialPreview(state)[0].shielded, true);
-  assert.equal(confirmPartial(state), true);
-  assert.equal(target.shieldActive, true);
-  advanceBy(state, 0.561);
-  assert.equal(target.shieldActive, false);
-  assert.equal(formatExpression(target.expression), 'x^2');
-  assert.equal(state.operatorQueue.some((item) => item.id === cardId), false);
-  assert.equal(state.energy, energyBefore - OPERATORS.partial.cost);
-});
-
-test('a shield blocks tower and divergent single-target transforms once', () => {
-  const towerState = createGame(241);
-  freezeSpawns(towerState);
-  const towerTarget = testEnemy(polynomial([term(1, 1)]), { shieldActive: true, affixes: ['shield'] });
-  towerState.enemies.push(towerTarget);
-  towerState.towers.push(configuredTower('derivative', undefined));
-  tick(towerState, 0.05);
-  assert.equal(towerTarget.shieldActive, true);
-  advanceBy(towerState, 0.521);
-  assert.equal(towerTarget.shieldActive, false);
-  assert.equal(formatExpression(towerTarget.expression), 'x');
-
-  const targetState = createGame(242);
-  targetState.chapterIndex = 5;
-  freezeSpawns(targetState);
-  targetState.operatorQueue = [];
-  const limitId = addArsenalCard(targetState, 'limit');
-  const limitTarget = testEnemy(trigonometric('sin', 1), {
-    family: 'trigonometric', shieldActive: true, affixes: ['shield'],
-  });
-  targetState.enemies.push(limitTarget);
-  const energyBefore = targetState.energy;
-  selectArsenalItem(targetState, limitId);
-  assert.equal(applyTargetOperator(targetState, limitTarget.id), true);
-  assert.equal(limitTarget.shieldActive, true);
-  advanceBy(targetState, 0.561);
-  assert.equal(limitTarget.shieldActive, false);
-  assert.equal(limitTarget.divergentTimer, 0);
-  assert.equal(targetState.energy, energyBefore - OPERATORS.limit.cost);
-  assert.equal(targetState.operatorQueue.some((item) => item.id === limitId), false);
-});
-
-test('a split enemy creates two unmodified non-recursive children', () => {
-  const state = createGame(25);
-  state.chapterIndex = 3;
-  freezeSpawns(state);
-  const cardId = addArsenalCard(state, 'partial');
-  state.enemies.push(testEnemy(polynomial(8), {
-    affixes: ['split'], splitExpressions: [polynomial([term(1, 1)]), polynomial(2)],
-  }));
-  selectArsenalItem(state, cardId);
-  assert.equal(confirmPartial(state), true);
-  assert.equal(state.kills, 0);
-  advanceBy(state, 0.561);
-  assert.equal(state.kills, 1);
-  assert.equal(state.enemies.length, 2);
-  assert.ok(state.enemies.every((enemy) => enemy.affixes.length === 0));
-  assert.ok(state.enemies.every((enemy) => enemy.splitExpressions.length === 0));
-});
-
-test('reflect then limit consumes two cards and eliminates e^x', () => {
-  const state = createGame(26);
-  state.chapterIndex = 5;
-  freezeSpawns(state);
-  state.operatorQueue = [];
-  const reflectId = addArsenalCard(state, 'reflect');
-  const limitId = addArsenalCard(state, 'limit');
-  const target = testEnemy(exponential(1), { id: 'exponential-target', family: 'exponential' });
-  state.enemies.push(target);
-  selectArsenalItem(state, reflectId);
-  assert.equal(applyTargetOperator(state, target.id), true);
-  assert.equal(formatExpression(target.expression), 'e^x');
-  advanceBy(state, 0.561);
-  assert.equal(formatExpression(target.expression), 'e^-x');
-  selectArsenalItem(state, limitId);
-  assert.equal(applyTargetOperator(state, target.id), true);
-  assert.equal(state.enemies.length, 1);
-  advanceBy(state, 0.561);
-  assert.equal(state.enemies.length, 0);
-  assert.equal(state.operatorQueue.length, 0);
-});
-
-test('an unsupported indefinite integral keeps its arsenal card and energy', () => {
-  const state = createGame(261);
-  state.chapterIndex = 5;
-  freezeSpawns(state);
-  state.operatorQueue = [];
-  const integralId = addArsenalCard(state, 'integral');
-  const target = testEnemy(logarithm(1, -1), { family: 'logarithmic' });
-  state.enemies.push(target);
-  const energyBefore = state.energy;
-  const rngBefore = state.rngState;
-
-  assert.equal(selectArsenalItem(state, integralId), true);
-  assert.equal(applyTargetOperator(state, target.id), false);
-  assert.equal(state.energy, energyBefore);
-  assert.equal(state.rngState, rngBefore);
-  assert.equal(state.operatorQueue.some((item) => item.id === integralId), true);
-  assert.equal(formatExpression(target.expression), 'x^-1ln|x|');
-});
-
-test('trigonometric and logarithmic limits trigger divergence', () => {
-  for (const [expression, family] of [
-    [trigonometric('cos', 1, 2), 'trigonometric'], [logarithm(1), 'logarithmic'],
-  ]) {
-    const state = createGame(family === 'trigonometric' ? 27 : 28);
-    state.chapterIndex = 5;
-    freezeSpawns(state);
-    state.operatorQueue = [];
-    const limitId = addArsenalCard(state, 'limit');
-    const target = testEnemy(expression, { family });
-    state.enemies.push(target);
-    selectArsenalItem(state, limitId);
-    assert.equal(applyTargetOperator(state, target.id), true);
-    assert.equal(target.divergentTimer, 0);
-    advanceBy(state, 0.561);
-    assert.equal(target.divergentTimer, 6);
   }
 });
 
@@ -693,6 +640,12 @@ test('a projectile changes the enemy only when its flight reaches the impact bou
   assert.equal(projectile.missed, false);
   assert.equal(projectile.progress, 1);
   assert.equal(state.effects.filter((effect) => effect.type === 'operator').length, 1);
+
+  const logsAfterImpact = state.logs.length;
+  advanceBy(state, 0.1);
+  assert.equal(formatExpression(target.expression), '2x');
+  assert.equal(state.logs.length, logsAfterImpact);
+  assert.equal(state.effects.filter((effect) => effect.type === 'operator').length, 1);
 });
 
 test('pause freezes projectile flight and impact timing', () => {
@@ -722,7 +675,10 @@ test('pause freezes projectile flight and impact timing', () => {
   assert.equal(projectile.impactResolved, false);
 
   assert.equal(togglePause(state), true);
-  advanceBy(state, impactBeforePause + 0.001);
+  advanceBy(state, impactBeforePause - 0.001);
+  assert.equal(formatExpression(target.expression), 'x^3');
+  assert.equal(projectile.status, 'flying');
+  advanceBy(state, 0.002);
   assert.equal(formatExpression(target.expression), '3x^2');
   assert.equal(projectile.status, 'impacted');
 });
@@ -746,9 +702,16 @@ test('concurrent projectiles recalculate against the expression at each impact',
   firstTower.cooldown = 999;
   secondTower.cooldown = 999;
 
-  advanceBy(state, 0.521);
+  advanceBy(state, 0.519);
+  assert.equal(formatExpression(target.expression), 'x^2');
+  advanceBy(state, 0.002);
   assert.equal(formatExpression(target.expression), '2');
   assert.ok(projectiles.every((projectile) => projectile.impactResolved));
+
+  const logsAfterImpacts = state.logs.length;
+  advanceBy(state, 0.1);
+  assert.equal(formatExpression(target.expression), '2');
+  assert.equal(state.logs.length, logsAfterImpacts);
 });
 
 test('a later projectile misses a target killed by an earlier impact without duplicate reward', () => {
@@ -786,7 +749,7 @@ test('a later projectile misses a target killed by an earlier impact without dup
   assert.equal(state.logs.length, logsAfterMiss);
 });
 
-test('a due projectile misses an enemy already at the base before body damage leaks', () => {
+test('a due projectile misses an enemy at the base before its body damage leaks', () => {
   const state = createGame(454);
   state.chapterIndex = 5;
   freezeSpawns(state);
@@ -797,6 +760,9 @@ test('a due projectile misses an enemy already at the base before body damage le
     id: 'base-boundary-target',
     position: 0.126,
     reward: 80,
+    affixes: ['shield'],
+    shieldExpression: polynomial([term(1, 1)]),
+    shieldActive: true,
   });
   state.enemies = [target];
   const reflectId = addArsenalCard(state, 'reflect');
@@ -814,10 +780,12 @@ test('a due projectile misses an enemy already at the base before body damage le
   assert.equal(projectile.impactResolved, true);
   assert.equal(projectile.missed, true);
   assert.equal(formatExpression(target.expression), '12');
+  assert.equal(formatExpression(target.shieldExpression), 'x');
   assert.equal(state.baseHp, baseHpBefore - 12);
   assert.equal(state.enemies.length, 0);
   assert.equal(state.kills, 0);
   assert.equal(state.energy, energyAfterLaunch);
+  assert.equal(state.effects.filter((effect) => effect.type === 'base-damage').length, 1);
 });
 
 test('an enemy reaching the base earlier in the same frame makes its projectile miss', () => {
@@ -842,6 +810,7 @@ test('an enemy reaching the base earlier in the same frame makes its projectile 
   tick(state, 0.2);
 
   assert.equal(projectile.status, 'missed');
+  assert.equal(projectile.impactResolved, true);
   assert.equal(projectile.missed, true);
   assert.equal(formatExpression(target.expression), '12');
   assert.equal(state.baseHp, baseHpBefore - 12);
@@ -872,6 +841,7 @@ test('a projectile arriving before the base crossing in the same frame hits firs
   tick(state, 0.2);
 
   assert.equal(projectile.status, 'impacted');
+  assert.equal(projectile.impactResolved, true);
   assert.equal(projectile.missed, false);
   assert.equal(state.baseHp, baseHpBefore);
   assert.equal(state.enemies.length, 0);
@@ -900,14 +870,18 @@ test('global partial remains retryable when no live target can be hit', () => {
   assert.equal(state.energy, energyBefore);
   assert.equal(state.partialUsed, false);
   assert.equal(projectileEffects(state).length, 0);
+
+  state.enemies.push(testEnemy(polynomial([term(1, 1)]), { id: 'retryable-partial-target' }));
+  assert.equal(confirmPartial(state), true);
+  assert.equal(projectileEffects(state).length, 1);
 });
 
-test('the final impact pulse finishes before endless mode advances', () => {
+test('the final impact pulse finishes before endless advances without stale dead enemies', () => {
   const state = createGame(456);
   state.chapterIndex = CHAPTERS.length;
   state.endlessRound = 1;
   state.phase = 'running';
-  state.currentWave = { ...state.currentWave, entries: [] };
+  state.currentWave = { ...state.currentWave, kind: 'challenge', entries: [] };
   state.nextSpawnIndex = 0;
   state.towers = [];
   state.effects = [];
@@ -921,29 +895,53 @@ test('the final impact pulse finishes before endless mode advances', () => {
   const [projectile] = projectileEffects(state);
   tower.cooldown = 999;
   advanceBy(state, projectile.impactIn - 0.001);
-  const resourcesBeforeImpact = {
+  state.energyClock = 4.999;
+  state.operatorCooldown = 0.001;
+  state.formulaCooldown = 0.001;
+  state.constantCooldown = 0.001;
+  state.operatorQueue.pop();
+  state.formulaQueue.pop();
+  state.constantQueue.pop();
+  const resources = () => ({
     energy: state.energy,
     energyClock: state.energyClock,
+    operatorCooldown: state.operatorCooldown,
+    formulaCooldown: state.formulaCooldown,
+    constantCooldown: state.constantCooldown,
+    operatorQueue: state.operatorQueue.map((item) => ({ ...item })),
+    formulaQueue: state.formulaQueue.map((item) => ({ ...item })),
+    constantQueue: state.constantQueue.map((item) => ({ ...item })),
     rngState: state.rngState,
-  };
+  });
+  const resourcesBeforeImpact = resources();
 
   advanceBy(state, 0.002);
 
   assert.equal(state.kills, 1);
+  assert.equal(state.enemies.some((enemy) => !enemy.dead), false);
   assert.equal(projectile.status, 'impacted');
+  assert.ok(projectile.ttl >= 0.299 && projectile.ttl <= 0.301);
   assert.equal(state.phase, 'running');
+  assert.equal(state.chapterIndex, CHAPTERS.length);
   assert.equal(state.endlessRound, 1);
   assert.strictEqual(state.currentWave, waveBeforeImpact);
-  assert.deepEqual(
-    { energy: state.energy, energyClock: state.energyClock, rngState: state.rngState },
-    resourcesBeforeImpact,
-  );
+  assert.deepEqual(resources(), resourcesBeforeImpact);
 
-  advanceBy(state, projectile.ttl + 0.001);
+  const remainingPulse = projectile.ttl;
+  advanceBy(state, remainingPulse - 0.001);
+  assert.equal(state.phase, 'running');
+  assert.equal(state.chapterIndex, CHAPTERS.length);
+  assert.equal(state.endlessRound, 1);
+  assert.strictEqual(state.currentWave, waveBeforeImpact);
+  assert.deepEqual(resources(), resourcesBeforeImpact);
+
+  advanceBy(state, 0.002);
   assert.equal(state.phase, 'preparing');
+  assert.equal(state.chapterIndex, CHAPTERS.length);
   assert.equal(state.endlessRound, 2);
   assert.notStrictEqual(state.currentWave, waveBeforeImpact);
   assert.equal(state.enemies.length, 0);
+  assert.equal(state.enemies.some((enemy) => enemy.dead), false);
 });
 
 test('global partial differentiation hits each live enemy at its staggered impact', () => {
@@ -971,6 +969,13 @@ test('global partial differentiation hits each live enemy at its staggered impac
     projectiles.map(({ row, position }) => ({ row, position })),
     [{ row: 0, position: 0.62 }, { row: 2, position: 0.81 }],
   );
+  for (const effect of projectiles) {
+    assertProjectile(effect, 'partial', {
+      targetId: effect === projectiles[0] ? 'partial-a' : 'partial-b',
+      sourceTowerId: null,
+    });
+    assert.equal(effect.from, undefined);
+  }
   assert.equal(projectiles[0].delay, 0);
   assert.equal(projectiles[0].impactIn, 0.56);
   assert.equal(projectiles[1].delay, 0.035);
@@ -978,13 +983,401 @@ test('global partial differentiation hits each live enemy at its staggered impac
   assert.equal(formatExpression(state.enemies[0].expression), 'x^2');
   assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
 
-  advanceBy(state, 0.561);
+  advanceBy(state, 0.559);
+  assert.equal(formatExpression(state.enemies[0].expression), 'x^2');
+  assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
+  assert.equal(projectiles[0].status, 'flying');
+  assert.equal(projectiles[1].status, 'flying');
+
+  advanceBy(state, 0.002);
   assert.equal(formatExpression(state.enemies[0].expression), '2x');
   assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
   assert.equal(projectiles[0].status, 'impacted');
+  assert.equal(projectiles[0].impactResolved, true);
   assert.equal(projectiles[1].status, 'flying');
 
-  advanceBy(state, 0.035);
+  advanceBy(state, 0.033);
+  assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
+  advanceBy(state, 0.002);
   assert.equal(formatExpression(state.enemies[1].expression), '3x^2');
   assert.equal(projectiles[1].status, 'impacted');
+  assert.equal(projectiles[1].impactResolved, true);
+});
+
+test('tower errors are evaluated against the active shield layer', () => {
+  const state = createGame(23);
+  freezeSpawns(state);
+  state.towers = [];
+  const target = testEnemy(polynomial([term(1, 1)]), {
+    affixes: ['shield'],
+    shieldExpression: polynomial([term(1, -1)]),
+    shieldActive: true,
+  });
+  const tower = configuredTower('evaluateTower', 0);
+  state.enemies.push(target);
+  state.towers.push(tower);
+  tick(state, 0.01);
+  assert.equal(tower.active, false);
+  assert.equal(tower.fireFlash, 0);
+  assert.equal(formatExpression(target.expression), 'x');
+  assert.equal(formatExpression(target.shieldExpression), 'x^-1');
+  assert.equal(projectileEffects(state).length, 0);
+});
+
+test('spawned shields default to an independent clone of the body expression', () => {
+  const state = createGame(24);
+  state.phase = 'running';
+  state.towers = [];
+  state.enemies = [];
+  state.nextSpawnIndex = 0;
+  state.currentWave = {
+    ...state.currentWave,
+    entries: [{
+      spawnAt: 0,
+      row: 0,
+      typeId: 'procedural-test',
+      name: '護盾測試函數',
+      art: 'enemy-art-polynomial',
+      family: 'polynomial',
+      expression: polynomial([term(1, 2)]),
+      speed: 0.001,
+      reward: 40,
+      affixes: ['shield'],
+      splitExpressions: [],
+    }],
+  };
+
+  tick(state, 0.01);
+
+  const [target] = state.enemies;
+  assert.ok(target);
+  assert.equal(target.shieldActive, true);
+  assert.notStrictEqual(target.shieldExpression, target.expression);
+  assert.deepEqual(target.shieldExpression, target.expression);
+  assert.strictEqual(activeEnemyExpression(target), target.shieldExpression);
+});
+
+test('tower hits transform a shield to zero before the next hit reaches the body', () => {
+  const state = createGame(241);
+  freezeSpawns(state);
+  state.towers = [];
+  const target = testEnemy(polynomial([term(1, 2)]), {
+    affixes: ['shield', 'split'],
+    shieldExpression: polynomial([term(1, 2)]),
+    shieldActive: true,
+    splitExpressions: [polynomial([term(1, 1)]), polynomial(2)],
+  });
+  const tower = configuredTower('derivative');
+  state.enemies.push(target);
+  state.towers.push(tower);
+  const energyBefore = state.energy;
+  const fire = (resolve = null) => {
+    tower.cooldown = 0;
+    tick(state, 0.01);
+    const projectile = projectileEffects(state).find((effect) => !effect.impactResolved);
+    assert.ok(projectile);
+    if (resolve) resolve(projectile);
+    else advanceBy(state, projectile.impactIn + 0.001);
+  };
+
+  fire((projectile) => {
+    assert.equal(formatExpression(target.shieldExpression), 'x^2');
+    assert.equal(formatExpression(target.expression), 'x^2');
+    advanceBy(state, projectile.impactIn - 0.001);
+    assert.equal(formatExpression(target.shieldExpression), 'x^2');
+    assert.equal(formatExpression(target.expression), 'x^2');
+    advanceBy(state, 0.002);
+  });
+  assert.equal(formatExpression(target.shieldExpression), '2x');
+  assert.equal(formatExpression(target.expression), 'x^2');
+  fire();
+  assert.equal(formatExpression(target.shieldExpression), '2');
+  assert.equal(formatExpression(target.expression), 'x^2');
+  fire();
+  assert.equal(target.shieldExpression, null);
+  assert.equal(target.shieldActive, false);
+  assert.strictEqual(activeEnemyExpression(target), target.expression);
+  assert.equal(formatExpression(target.expression), 'x^2');
+  assert.equal(state.kills, 0);
+  assert.equal(state.energy, energyBefore);
+  assert.equal(state.enemies.length, 1);
+  assert.equal(state.effects.some((effect) => effect.type === 'split'), false);
+
+  fire();
+  assert.equal(formatExpression(target.expression), '2x');
+  fire();
+  assert.equal(formatExpression(target.expression), '2');
+  fire();
+  assert.equal(state.kills, 1);
+  assert.equal(state.energy, energyBefore + 24);
+  assert.equal(state.enemies.length, 2);
+  assert.ok(state.enemies.every((enemy) => enemy.shieldExpression === null));
+  assert.equal(state.effects.filter((effect) => effect.type === 'split').length, 1);
+});
+
+test('global partial preview and resolution operate on one active layer per enemy', () => {
+  const state = createGame(242);
+  state.chapterIndex = 3;
+  freezeSpawns(state);
+  state.towers = [];
+  state.effects = [];
+  state.operatorQueue = [];
+  const progressingShield = testEnemy(polynomial([term(1, 3)]), {
+    id: 'shield-progress',
+    shieldExpression: polynomial([term(1, 2)]),
+    shieldActive: true,
+    affixes: ['shield'],
+  });
+  const breakingShield = testEnemy(polynomial([term(1, 2)]), {
+    id: 'shield-break',
+    shieldExpression: polynomial(7),
+    shieldActive: true,
+    affixes: ['shield'],
+  });
+  const exposedBody = testEnemy(polynomial(5), { id: 'body-zero' });
+  const deadEnemy = testEnemy(polynomial(9), { id: 'already-dead', dead: true });
+  state.enemies = [progressingShield, breakingShield, exposedBody, deadEnemy];
+  const cardId = addArsenalCard(state, 'partial');
+  const preview = partialPreview(state).map((item) => ({
+    id: item.id,
+    before: item.before,
+    after: item.after,
+    dies: item.dies,
+    shielded: item.shielded,
+    breaksShield: item.breaksShield,
+    layer: item.layer,
+    damageBefore: item.damageBefore,
+    damageAfter: item.damageAfter,
+  }));
+  assert.deepEqual(preview, [
+    {
+      id: 'shield-progress', before: 'x^2', after: '2x', dies: false,
+      shielded: true, breaksShield: false, layer: 'shield', damageBefore: 1, damageAfter: 2,
+    },
+    {
+      id: 'shield-break', before: '7', after: '0', dies: false,
+      shielded: true, breaksShield: true, layer: 'shield', damageBefore: 7, damageAfter: 0,
+    },
+    {
+      id: 'body-zero', before: '5', after: '0', dies: true,
+      shielded: false, breaksShield: false, layer: 'body', damageBefore: 5, damageAfter: 0,
+    },
+  ]);
+
+  const energyBefore = state.energy;
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(confirmPartial(state), true);
+  assert.equal(formatExpression(progressingShield.shieldExpression), 'x^2');
+  assert.equal(formatExpression(progressingShield.expression), 'x^3');
+  assert.equal(formatExpression(breakingShield.shieldExpression), '7');
+  assert.equal(formatExpression(breakingShield.expression), 'x^2');
+  assert.deepEqual(
+    state.enemies.map((enemy) => enemy.id),
+    ['shield-progress', 'shield-break', 'body-zero', 'already-dead'],
+  );
+  assert.equal(state.kills, 0);
+  assert.equal(state.energy, energyBefore - OPERATORS.partial.cost);
+  assert.equal(projectileEffects(state).length, 3);
+
+  const finalImpact = Math.max(...projectileEffects(state).map((effect) => effect.impactIn));
+  advanceBy(state, finalImpact + 0.001);
+  assert.equal(formatExpression(progressingShield.shieldExpression), '2x');
+  assert.equal(formatExpression(progressingShield.expression), 'x^3');
+  assert.equal(breakingShield.shieldExpression, null);
+  assert.equal(formatExpression(breakingShield.expression), 'x^2');
+  assert.deepEqual(state.enemies.map((enemy) => enemy.id), ['shield-progress', 'shield-break']);
+  assert.equal(state.kills, 1);
+  assert.equal(state.energy, energyBefore - OPERATORS.partial.cost + exposedBody.reward);
+  assert.equal(projectileEffects(state).length, 3);
+});
+
+test('single-target operators transform and clear shields without reaching the body', () => {
+  const state = createGame(243);
+  state.chapterIndex = 5;
+  freezeSpawns(state);
+  state.towers = [];
+  state.operatorQueue = [];
+  const target = testEnemy(polynomial([term(1, 1)]), {
+    shieldExpression: exponential(1),
+    shieldActive: true,
+    affixes: ['shield'],
+  });
+  state.enemies.push(target);
+  const reflectId = addArsenalCard(state, 'reflect');
+  const limitId = addArsenalCard(state, 'limit');
+  const energyBefore = state.energy;
+
+  assert.equal(selectArsenalItem(state, reflectId), true);
+  assert.equal(applyTargetOperator(state, target.id), true);
+  assert.equal(formatExpression(target.shieldExpression), 'e^x');
+  const reflectProjectile = projectileEffects(state).find((effect) => effect.operatorId === 'reflect');
+  advanceBy(state, reflectProjectile.impactIn + 0.001);
+  assert.equal(formatExpression(target.shieldExpression), 'e^-x');
+  assert.equal(formatExpression(target.expression), 'x');
+
+  assert.equal(selectArsenalItem(state, limitId), true);
+  assert.equal(applyTargetOperator(state, target.id), true);
+  assert.equal(formatExpression(target.shieldExpression), 'e^-x');
+  const limitProjectile = projectileEffects(state).find((effect) => effect.operatorId === 'limit');
+  advanceBy(state, limitProjectile.impactIn + 0.001);
+  assert.equal(target.shieldExpression, null);
+  assert.equal(formatExpression(target.expression), 'x');
+  assert.equal(state.enemies.length, 1);
+  assert.equal(state.kills, 0);
+  assert.equal(state.energy, energyBefore - OPERATORS.reflect.cost - OPERATORS.limit.cost);
+});
+
+test('a divergent limit is evaluated against the shield and does not remove it', () => {
+  const state = createGame(244);
+  state.chapterIndex = 5;
+  freezeSpawns(state);
+  state.operatorQueue = [];
+  const target = testEnemy(polynomial(12), {
+    family: 'trigonometric',
+    shieldExpression: trigonometric('sin', 1),
+    shieldActive: true,
+    affixes: ['shield'],
+  });
+  state.enemies.push(target);
+  const limitId = addArsenalCard(state, 'limit');
+
+  assert.equal(selectArsenalItem(state, limitId), true);
+  assert.equal(applyTargetOperator(state, target.id), true);
+  assert.equal(formatExpression(target.shieldExpression), 'sin(x)');
+  assert.equal(formatExpression(target.expression), '12');
+  assert.equal(target.divergentTimer, 0);
+  const [projectile] = projectileEffects(state);
+  advanceBy(state, projectile.impactIn - 0.001);
+  assert.equal(target.divergentTimer, 0);
+  assert.equal(state.effects.some((effect) => effect.type === 'divergent'), false);
+  advanceBy(state, 0.002);
+  assert.ok(target.divergentTimer > 5.99 && target.divergentTimer <= 6);
+  assert.equal(projectile.status, 'impacted');
+  assert.equal(state.effects.filter((effect) => effect.type === 'divergent').length, 1);
+});
+
+test('Euler tower compatibility follows the shield before the hidden body', () => {
+  const state = createGame(245);
+  state.chapterIndex = 4;
+  freezeSpawns(state);
+  state.towers = [];
+  state.effects = [];
+  const target = testEnemy(exponential(1), {
+    family: 'exponential',
+    shieldExpression: polynomial([term(1, -1)]),
+    shieldActive: true,
+    affixes: ['shield'],
+  });
+  const tower = configuredTower('eulerTower', 1);
+  state.enemies.push(target);
+  state.towers.push(tower);
+
+  tick(state, 0.01);
+  assert.equal(formatExpression(target.shieldExpression), 'x^-1');
+  const [projectile] = projectileEffects(state);
+  advanceBy(state, projectile.impactIn + 0.001);
+  assert.equal(target.shieldExpression, null);
+  assert.equal(formatExpression(target.expression), 'e^x');
+  assert.equal(projectileEffects(state).length, 1);
+
+  tower.cooldown = 0;
+  tick(state, 0.01);
+  assert.equal(formatExpression(target.expression), 'e^x');
+  assert.equal(projectileEffects(state).length, 1);
+});
+
+test('a split enemy creates two unmodified non-recursive children', () => {
+  const state = createGame(25);
+  state.chapterIndex = 3;
+  freezeSpawns(state);
+  const cardId = addArsenalCard(state, 'partial');
+  state.enemies.push(testEnemy(polynomial(8), {
+    affixes: ['split'], splitExpressions: [polynomial([term(1, 1)]), polynomial(2)],
+  }));
+  selectArsenalItem(state, cardId);
+  assert.equal(confirmPartial(state), true);
+  assert.equal(state.kills, 0);
+  assert.equal(state.enemies.length, 1);
+  const [projectile] = projectileEffects(state);
+  advanceBy(state, projectile.impactIn + 0.001);
+  assert.equal(state.kills, 1);
+  assert.equal(state.enemies.length, 2);
+  assert.ok(state.enemies.every((enemy) => enemy.affixes.length === 0));
+  assert.ok(state.enemies.every((enemy) => enemy.shieldExpression === null));
+  assert.ok(state.enemies.every((enemy) => enemy.splitExpressions.length === 0));
+});
+
+test('reflect then limit consumes two cards and eliminates e^x', () => {
+  const state = createGame(26);
+  state.chapterIndex = 5;
+  freezeSpawns(state);
+  state.operatorQueue = [];
+  const reflectId = addArsenalCard(state, 'reflect');
+  const limitId = addArsenalCard(state, 'limit');
+  const target = testEnemy(exponential(1), { id: 'exponential-target', family: 'exponential' });
+  state.enemies.push(target);
+  selectArsenalItem(state, reflectId);
+  assert.equal(applyTargetOperator(state, target.id), true);
+  assert.equal(formatExpression(target.expression), 'e^x');
+  let projectile = projectileEffects(state).find((effect) => effect.operatorId === 'reflect');
+  advanceBy(state, projectile.impactIn + 0.001);
+  assert.equal(formatExpression(target.expression), 'e^-x');
+  selectArsenalItem(state, limitId);
+  assert.equal(applyTargetOperator(state, target.id), true);
+  assert.equal(state.enemies.length, 1);
+  projectile = projectileEffects(state).find((effect) => effect.operatorId === 'limit');
+  advanceBy(state, projectile.impactIn + 0.001);
+  assert.equal(state.enemies.length, 0);
+  assert.equal(state.operatorQueue.length, 0);
+});
+
+test('an unsupported shield integral keeps its arsenal card, energy, and both layers', () => {
+  const state = createGame(261);
+  state.chapterIndex = 5;
+  freezeSpawns(state);
+  state.operatorQueue = [];
+  const integralId = addArsenalCard(state, 'integral');
+  const target = testEnemy(polynomial([term(1, 1)]), {
+    family: 'logarithmic',
+    affixes: ['shield'],
+    shieldExpression: logarithm(1, -1),
+    shieldActive: true,
+  });
+  state.enemies.push(target);
+  const energyBefore = state.energy;
+  const rngBefore = state.rngState;
+
+  assert.equal(selectArsenalItem(state, integralId), true);
+  assert.equal(applyTargetOperator(state, target.id), false);
+  assert.equal(state.energy, energyBefore);
+  assert.equal(state.rngState, rngBefore);
+  assert.equal(state.operatorQueue.some((item) => item.id === integralId), true);
+  assert.equal(formatExpression(target.expression), 'x');
+  assert.equal(formatExpression(target.shieldExpression), 'x^-1ln|x|');
+  assert.equal(projectileEffects(state).length, 0);
+});
+
+test('trigonometric and logarithmic limits trigger divergence', () => {
+  for (const [expression, family] of [
+    [trigonometric('cos', 1, 2), 'trigonometric'], [logarithm(1), 'logarithmic'],
+  ]) {
+    const state = createGame(family === 'trigonometric' ? 27 : 28);
+    state.chapterIndex = 5;
+    freezeSpawns(state);
+    state.operatorQueue = [];
+    const limitId = addArsenalCard(state, 'limit');
+    const target = testEnemy(expression, { family });
+    state.enemies.push(target);
+    selectArsenalItem(state, limitId);
+    assert.equal(applyTargetOperator(state, target.id), true);
+    const [projectile] = projectileEffects(state);
+    assert.equal(projectileEffects(state).length, 1);
+    assertProjectile(projectile, 'limit', { row: target.row, position: target.position });
+    assert.equal(target.divergentTimer, 0);
+    advanceBy(state, projectile.impactIn - 0.001);
+    assert.equal(target.divergentTimer, 0);
+    advanceBy(state, 0.002);
+    assert.ok(target.divergentTimer > 5.99 && target.divergentTimer <= 6);
+    assert.equal(projectile.status, 'impacted');
+  }
 });
