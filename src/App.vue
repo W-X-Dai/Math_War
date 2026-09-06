@@ -115,6 +115,8 @@ const {
   cancelConfirmation,
   confirmPendingAction,
   openLevel,
+  importProgressFile,
+  prepareProgressDownload,
   requestProgressReset,
   requestRunExit,
   retryRun,
@@ -127,6 +129,18 @@ const {
   replaceGame,
   resetClock: () => { previousTime = 0; },
 });
+
+function downloadProgressFile() {
+  const { filename, contents } = prepareProgressDownload();
+  const url = URL.createObjectURL(new Blob([contents], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 function disarmRecycle() {
   recycleArmed.value = false;
@@ -371,6 +385,8 @@ defineExpose({ game, actions, progress });
     @update:skip-tutorial="skipTutorial = $event"
     @start-level="startSelectedLevel"
     @start-endless="startEndless"
+    @download-progress="downloadProgressFile"
+    @import-progress="importProgressFile"
     @request-reset-progress="requestProgressReset"
   />
 

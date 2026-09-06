@@ -1,6 +1,8 @@
 import { CHAPTERS } from './content.js';
 
 export const PROGRESS_STORAGE_KEY = 'math-zombie.progress.v1';
+export const PROGRESS_FILE_TYPE = 'math-zombie-progress';
+export const PROGRESS_FILE_VERSION = 1;
 
 const PROGRESS_VERSION = 1;
 
@@ -31,6 +33,58 @@ export function normalizeProgress(value) {
     version: PROGRESS_VERSION,
     completedLevelIds,
   };
+}
+
+function isExactProgress(value) {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || value.version !== PROGRESS_VERSION
+    || !Array.isArray(value.completedLevelIds)
+  ) {
+    return false;
+  }
+
+  const normalized = normalizeProgress(value);
+  return normalized.completedLevelIds.length === value.completedLevelIds.length
+    && normalized.completedLevelIds.every((levelId, index) => (
+      levelId === value.completedLevelIds[index]
+    ));
+}
+
+export function serializeProgressFile(progress) {
+  return JSON.stringify({
+    fileType: PROGRESS_FILE_TYPE,
+    fileVersion: PROGRESS_FILE_VERSION,
+    progress: normalizeProgress(progress),
+  }, null, 2);
+}
+
+export function parseProgressFile(serialized) {
+  let value;
+  try {
+    value = JSON.parse(serialized);
+  } catch {
+    return { ok: false, error: 'invalid-json' };
+  }
+
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || value.fileType !== PROGRESS_FILE_TYPE
+    || !Object.hasOwn(value, 'progress')
+  ) {
+    return { ok: false, error: 'invalid-format' };
+  }
+  if (value.fileVersion !== PROGRESS_FILE_VERSION) {
+    return { ok: false, error: 'unsupported-version' };
+  }
+  if (!isExactProgress(value.progress)) {
+    return { ok: false, error: 'invalid-progress' };
+  }
+
+  return { ok: true, progress: normalizeProgress(value.progress) };
 }
 
 function defaultStorage() {

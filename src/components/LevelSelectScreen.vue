@@ -34,6 +34,8 @@ const emit = defineEmits([
   'update:skip-tutorial',
   'start-level',
   'start-endless',
+  'download-progress',
+  'import-progress',
   'request-reset-progress',
 ]);
 
@@ -115,6 +117,13 @@ function startSelectedLevel() {
   if (!selectedLevel.value || !selectedIsUnlocked.value) return;
   emit('start-level', selectedLevel.value.index);
 }
+
+function importProgress(event) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (file) emit('import-progress', file);
+  input.value = '';
+}
 </script>
 
 <template>
@@ -144,12 +153,34 @@ function startSelectedLevel() {
             <p class="level-select-kicker">證明路徑</p>
             <h2 id="level-map-title">選擇關卡</h2>
           </div>
-          <button
-            class="level-reset-button"
-            type="button"
-            @click="$emit('request-reset-progress')"
-          >清除進度</button>
+          <div class="level-progress-actions" aria-label="進度檔案操作">
+            <button
+              class="level-progress-file-button"
+              type="button"
+              @click="$emit('download-progress')"
+            >下載進度 JSON</button>
+            <label class="level-progress-file-button level-progress-upload-button">
+              <input
+                class="sr-only"
+                type="file"
+                accept=".json,application/json"
+                @change="importProgress"
+              >
+              <span>載入進度 JSON</span>
+            </label>
+            <button
+              class="level-reset-button"
+              type="button"
+              @click="$emit('request-reset-progress')"
+            >清除進度</button>
+          </div>
         </div>
+        <p
+          class="level-select-notice"
+          :class="{ 'is-error': notice.startsWith('無法載入') }"
+          aria-live="polite"
+          aria-atomic="true"
+        >{{ notice }}</p>
 
         <ol class="level-card-grid">
           <li v-for="(level, index) in levelDetails" :key="level.id">
@@ -201,7 +232,6 @@ function startSelectedLevel() {
           </li>
         </ol>
 
-        <p class="level-select-notice" aria-live="polite" aria-atomic="true">{{ notice }}</p>
       </section>
 
       <aside class="level-detail-panel" aria-live="polite">

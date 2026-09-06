@@ -139,16 +139,49 @@
   font-size: clamp(26px, 2.6vw, 40px);
 }
 
+.level-progress-file-button,
 .level-reset-button,
 .confirmation-confirm-button {
+  display: inline-grid;
   min-height: 44px;
   padding: 9px 15px;
-  border: 1px solid rgba(232, 111, 90, 0.58);
+  place-items: center;
+  border: 1px solid rgba(229, 169, 77, 0.48);
   border-radius: 2px;
   background: transparent;
   color: var(--parchment-dim);
   cursor: pointer;
   font-weight: 800;
+  text-align: center;
+}
+
+.level-progress-actions {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.level-progress-file-button:hover,
+.level-progress-file-button:focus-within {
+  border-color: var(--brass-bright);
+  color: var(--brass-bright);
+}
+
+.level-progress-upload-button {
+  position: relative;
+}
+
+.level-progress-upload-button:focus-within {
+  outline: 3px solid var(--mint);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(6, 23, 25, 0.9), 0 0 0 7px rgba(127, 211, 179, 0.55);
+}
+
+.level-reset-button,
+.confirmation-confirm-button {
+  border: 1px solid rgba(232, 111, 90, 0.58);
 }
 
 .level-reset-button:hover,
@@ -269,10 +302,14 @@
 
 .level-select-notice {
   min-height: 1.5em;
-  margin: 14px 0 -6px;
+  margin: -6px 0 14px;
   color: var(--mint);
   font-size: 0.78rem;
   line-height: 1.5;
+}
+
+.level-select-notice.is-error {
+  color: #ffc1b6;
 }
 
 .level-detail-panel {
@@ -598,6 +635,8 @@
     flex-direction: column;
   }
 
+  .level-progress-actions,
+  .level-progress-file-button,
   .level-reset-button {
     width: 100%;
   }

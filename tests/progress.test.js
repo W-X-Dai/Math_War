@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import { CHAPTERS } from '../src/game/content.js';
 import {
+  PROGRESS_FILE_TYPE,
+  PROGRESS_FILE_VERSION,
   PROGRESS_STORAGE_KEY,
   completeLevel,
   createDefaultProgress,
@@ -10,8 +12,10 @@ import {
   isLevelUnlocked,
   loadProgress,
   normalizeProgress,
+  parseProgressFile,
   resetProgress,
   saveProgress,
+  serializeProgressFile,
 } from '../src/game/progress.js';
 
 function memoryStorage(initial = {}) {
@@ -65,6 +69,99 @@ test('normalization rejects unknown versions and malformed payloads', () => {
   assert.deepEqual(normalizeProgress({ version: 2, completedLevelIds: [] }), createDefaultProgress());
   assert.deepEqual(normalizeProgress({ version: 1, completedLevelIds: 'foundation' }), createDefaultProgress());
   assert.deepEqual(normalizeProgress(null), createDefaultProgress());
+});
+
+test('progress files round-trip through a versioned JSON envelope', () => {
+  const ids = CHAPTERS.map((chapter) => chapter.id);
+  const progress = { version: 1, completedLevelIds: ids.slice(0, 3) };
+
+  assert.equal(PROGRESS_FILE_TYPE, 'math-zombie-progress');
+  assert.equal(PROGRESS_FILE_VERSION, 1);
+  assert.deepEqual(parseProgressFile(serializeProgressFile(progress)), {
+    ok: true,
+    progress,
+  });
+});
+
+test('progress file export normalizes progress and uses stable pretty JSON', () => {
+  const ids = CHAPTERS.map((chapter) => chapter.id);
+
+  assert.equal(
+    serializeProgressFile({
+      version: 1,
+      completedLevelIds: [ids[0], ids[2], ids[1]],
+    }),
+    [
+      '{',
+      '  "fileType": "math-zombie-progress",',
+      '  "fileVersion": 1,',
+      '  "progress": {',
+      '    "version": 1,',
+      '    "completedLevelIds": [',
+      `      "${ids[0]}"`,
+      '    ]',
+      '  }',
+      '}',
+    ].join('\n'),
+  );
+});
+
+test('progress file import identifies invalid JSON and malformed envelopes', () => {
+  assert.deepEqual(parseProgressFile('{not-json'), { ok: false, error: 'invalid-json' });
+  assert.deepEqual(parseProgressFile(null), { ok: false, error: 'invalid-format' });
+  assert.deepEqual(parseProgressFile(JSON.stringify({
+    fileType: 'another-game',
+    fileVersion: PROGRESS_FILE_VERSION,
+    progress: createDefaultProgress(),
+  })), { ok: false, error: 'invalid-format' });
+  assert.deepEqual(parseProgressFile(JSON.stringify({
+    fileType: PROGRESS_FILE_TYPE,
+    fileVersion: PROGRESS_FILE_VERSION,
+  })), { ok: false, error: 'invalid-format' });
+});
+
+test('progress file import rejects unsupported file versions', () => {
+  assert.deepEqual(parseProgressFile(JSON.stringify({
+    fileType: PROGRESS_FILE_TYPE,
+    fileVersion: PROGRESS_FILE_VERSION + 1,
+    progress: createDefaultProgress(),
+  })), { ok: false, error: 'unsupported-version' });
+});
+
+test('progress file import rejects malformed progress without coercion', () => {
+  const malformedProgressValues = [
+    null,
+    [],
+    { version: 2, completedLevelIds: [] },
+    { version: 1, completedLevelIds: 'not-an-array' },
+  ];
+
+  for (const progress of malformedProgressValues) {
+    assert.deepEqual(parseProgressFile(JSON.stringify({
+      fileType: PROGRESS_FILE_TYPE,
+      fileVersion: PROGRESS_FILE_VERSION,
+      progress,
+    })), { ok: false, error: 'invalid-progress' });
+  }
+});
+
+test('progress file import requires an exact continuous chapter prefix', () => {
+  const ids = CHAPTERS.map((chapter) => chapter.id);
+  const invalidSequences = [
+    [ids[1]],
+    [ids[0], ids[2], ids[1]],
+    [ids[0], 'unknown-level'],
+    [...ids, 'future-level'],
+    [...ids, ids.at(-1)],
+  ];
+
+  for (const completedLevelIds of invalidSequences) {
+    assert.deepEqual(parseProgressFile(JSON.stringify({
+      fileType: PROGRESS_FILE_TYPE,
+      fileVersion: PROGRESS_FILE_VERSION,
+      progress: { version: 1, completedLevelIds },
+    })), { ok: false, error: 'invalid-progress' });
+  }
 });
 
 test('load returns normalized stored progress and safely falls back on invalid data', () => {

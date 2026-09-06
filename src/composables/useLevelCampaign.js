@@ -6,9 +6,19 @@ import {
   completeLevel,
   createDefaultProgress,
   loadProgress,
+  parseProgressFile,
   resetProgress,
   saveProgress,
+  serializeProgressFile,
 } from '../game/progress.js';
+
+const MAX_PROGRESS_FILE_BYTES = 64 * 1024;
+const progressImportErrors = {
+  'invalid-json': '無法載入：檔案不是有效的 JSON。',
+  'invalid-format': '無法載入：這不是「微分防線」進度檔。',
+  'unsupported-version': '無法載入：此進度檔版本不受目前遊戲支援。',
+  'invalid-progress': '無法載入：關卡進度內容不完整或已損壞。',
+};
 
 export function randomSeed() {
   const values = new Uint32Array(1);
@@ -22,6 +32,11 @@ function browserStorage() {
   } catch {
     return null;
   }
+}
+
+function localDateStamp(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** Owns level selection, attempt identity, unlock persistence, and navigation. */
@@ -138,6 +153,51 @@ export function useLevelCampaign({ game, replaceGame, resetClock }) {
     levelSelectNotice.value = '';
   }
 
+  function prepareProgressDownload(date = new Date()) {
+    levelSelectNotice.value = '進度 JSON 已下載。';
+    return {
+      filename: `math-zombie-progress-${localDateStamp(date)}.json`,
+      contents: serializeProgressFile(progress),
+    };
+  }
+
+  async function importProgressFile(file) {
+    levelSelectNotice.value = '';
+    if (!file || typeof file.text !== 'function') {
+      levelSelectNotice.value = '無法載入：沒有選取進度檔。';
+      return false;
+    }
+    if (file.size > MAX_PROGRESS_FILE_BYTES) {
+      levelSelectNotice.value = '無法載入：進度檔超過 64 KB。';
+      return false;
+    }
+
+    let serialized;
+    try {
+      serialized = await file.text();
+    } catch {
+      levelSelectNotice.value = '無法載入：瀏覽器無法讀取這個檔案。';
+      return false;
+    }
+
+    const parsed = parseProgressFile(serialized);
+    if (!parsed.ok) {
+      levelSelectNotice.value = progressImportErrors[parsed.error]
+        ?? '無法載入：進度檔內容無效。';
+      return false;
+    }
+
+    Object.assign(progress, parsed.progress);
+    const completedCount = parsed.progress.completedLevelIds.length;
+    selectedLevelIndex.value = completedCount === CHAPTERS.length ? null : completedCount;
+    skipTutorial.value = false;
+    const persisted = saveProgress(progressStorage, parsed.progress);
+    levelSelectNotice.value = persisted
+      ? `已載入 ${completedCount} / ${CHAPTERS.length} 關通關進度。`
+      : `已載入 ${completedCount} / ${CHAPTERS.length} 關通關進度，但瀏覽器無法保存。`;
+    return true;
+  }
+
   function cancelConfirmation() {
     const kind = pendingConfirmation.value;
     pendingConfirmation.value = null;
@@ -194,7 +254,9 @@ export function useLevelCampaign({ game, replaceGame, resetClock }) {
     skipTutorial,
     cancelConfirmation,
     confirmPendingAction,
+    importProgressFile,
     openLevel,
+    prepareProgressDownload,
     requestProgressReset,
     requestRunExit,
     retryRun,
