@@ -9,19 +9,19 @@ import {
   cancelSelection,
   confirmPartial,
   createGame,
+  castTargetOperatorFromArsenal,
+  deployTowerFromArsenal,
   discardArsenalItem,
-  discardConstantItem,
-  discardFormulaItem,
   discardStoredConstant,
+  inscribeParameterScroll,
+  inscribeParameterValue,
   placeTower,
-  prepareAssembly,
   recycleTower,
   selectArsenalItem,
-  selectConstantItem,
   selectEnemy,
-  selectFormulaItem,
   selectStoredConstant,
   startWave,
+  storeNumericConstant,
   tick,
   togglePause,
   toggleSpeed,
@@ -38,20 +38,20 @@ import LevelSelectScreen from './components/LevelSelectScreen.vue';
 import OperatorDock from './components/OperatorDock.vue';
 import WavePrepBar from './components/WavePrepBar.vue';
 import { useLevelCampaign, randomSeed } from './composables/useLevelCampaign.js';
-import { OPERATOR_QUEUE_CAPACITY } from './game/content.js';
+import { OPERATORS, OPERATOR_QUEUE_CAPACITY } from './game/content.js';
+import { directConstantToken } from './ui/constant-tokens.js';
 
 const game = reactive(createGame(randomSeed()));
 const dragPayload = ref(null);
 const dragOverTrash = ref(false);
 const dragOverTowerId = ref(null);
+const dragOverOperatorItemId = ref(null);
 const recycleArmed = ref(false);
 let audioContext = null;
 let animationFrame = 0;
 let previousTime = 0;
 
 const { audio } = PRESENTATION_CONFIG;
-const trashDiscardKinds = new Set(['arsenal', 'formula', 'constant', 'stored-constant']);
-
 function tone(kind = 'select') {
   if (!game.sound) return;
   try {
@@ -91,6 +91,7 @@ function replaceGame(seed, options = {}) {
   dragPayload.value = null;
   dragOverTrash.value = false;
   dragOverTowerId.value = null;
+  dragOverOperatorItemId.value = null;
   recycleArmed.value = false;
   previousTime = 0;
   tone('select');
@@ -185,8 +186,6 @@ const actions = {
   advanceWeaponTutorial: () => act(() => advanceWeaponTutorial(game), 'success'),
   advanceEnemyTutorial: () => act(() => advanceEnemyTutorial(game), 'success'),
   discardArsenal: (itemId) => act(() => discardArsenalItem(game, itemId), 'danger'),
-  discardFormula: (itemId) => act(() => discardFormulaItem(game, itemId), 'danger'),
-  discardConstant: (itemId) => act(() => discardConstantItem(game, itemId), 'danger'),
   discardStoredConstant: (itemId) => act(() => discardStoredConstant(game, itemId), 'danger'),
   recycleTower: (towerId) => {
     const changed = act(() => recycleTower(game, towerId), 'success');
@@ -201,19 +200,29 @@ const actions = {
     tone('select');
     return true;
   },
-  pickFormula: (itemId) => {
-    disarmRecycle();
-    return act(() => selectFormulaItem(game, itemId));
-  },
-  pickConstant: (itemId) => {
-    disarmRecycle();
-    return act(() => selectConstantItem(game, itemId));
-  },
   pickStoredConstant: (itemId) => {
     disarmRecycle();
     return act(() => selectStoredConstant(game, itemId));
   },
-  prepareAssembly: () => act(() => prepareAssembly(game), 'success'),
+  inscribeScroll: (itemId, constantId) => act(
+    () => inscribeParameterScroll(game, itemId, constantId),
+    'success',
+  ),
+  inscribeValue: (itemId, tokenId) => {
+    const token = directConstantToken(tokenId);
+    return token
+      ? act(() => inscribeParameterValue(game, itemId, token.value, `圓盤 ${token.label}`), 'success')
+      : false;
+  },
+  dropTower: (itemId, row, column) => act(
+    () => deployTowerFromArsenal(game, itemId, row, column),
+    'place',
+  ),
+  dropTargetOperator: (itemId, enemyId) => act(
+    () => castTargetOperatorFromArsenal(game, itemId, enemyId),
+    'place',
+  ),
+  storeConstant: (value, source) => act(() => storeNumericConstant(game, value, source), 'success'),
   closeFormula: () => {
     game.selectedEnemyId = null;
   },
@@ -223,15 +232,56 @@ function closestElement(target, selector) {
   return target instanceof Element ? target.closest(selector) : null;
 }
 
+function arsenalItem(itemId) {
+  return [...game.operatorQueue, ...(game.scrollLibrary ?? [])].find(
+    (candidate) => candidate.id === itemId,
+  ) ?? null;
+}
+
+function operatorDragContext(itemId) {
+  const item = arsenalItem(itemId);
+  const operator = item ? OPERATORS[item.operatorId] : null;
+  const parameterReady = !operator?.parameterKeys?.length || operator.parameterKeys.every(
+    (key) => item[key] !== null && item[key] !== undefined,
+  );
+  return { item, operator, parameterReady };
+}
+
+function dragDestination(target) {
+  return {
+    operatorCard: closestElement(target, '.operator-card[data-item-id]'),
+    cell: closestElement(target, '.grid-cell.is-placement-zone'),
+    enemy: closestElement(target, '.enemy[data-enemy-id]'),
+    battlefield: closestElement(target, '.battlefield'),
+  };
+}
+
+function acceptsArsenalDrop(context, destination) {
+  const { operator, parameterReady } = context;
+  if (operator?.kind === 'tower') return Boolean(destination.cell);
+  if (operator?.kind === 'target') return parameterReady && Boolean(destination.enemy);
+  return operator?.kind === 'global' && Boolean(destination.battlefield);
+}
+
+function canDiscardPayload(payload) {
+  if (payload?.kind === 'stored-constant') {
+    return game.storedConstants.some((item) => item.id === payload.id);
+  }
+  if (payload?.kind !== 'arsenal') return false;
+  const item = game.operatorQueue.find((candidate) => candidate.id === payload.id);
+  return Boolean(item && OPERATORS[item.operatorId]?.kind === 'tower');
+}
+
 function handleDragStart(event) {
   const item = closestElement(event.target, '[data-drag-kind]');
   if (!item) return;
   recycleArmed.value = false;
   dragOverTowerId.value = null;
   dragOverTrash.value = false;
+  dragOverOperatorItemId.value = null;
   dragPayload.value = { kind: item.dataset.dragKind, id: item.dataset.dragId };
   if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.effectAllowed = dragPayload.value.kind === 'numeric-constant' ? 'copy' : 'move';
     event.dataTransfer.setData('text/plain', JSON.stringify(dragPayload.value));
   }
 }
@@ -240,6 +290,7 @@ function handleDragEnd() {
   dragPayload.value = null;
   dragOverTrash.value = false;
   dragOverTowerId.value = null;
+  dragOverOperatorItemId.value = null;
   recycleArmed.value = false;
 }
 
@@ -253,9 +304,40 @@ function handleDragOver(event) {
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
     return;
   }
-  if (!trashDiscardKinds.has(dragPayload.value.kind) || !closestElement(event.target, '.trash-dropzone')) return;
+
+  const destination = dragDestination(event.target);
+  const { operatorCard } = destination;
+  if (
+    ['stored-constant', 'numeric-constant'].includes(dragPayload.value.kind)
+    && operatorCard?.classList.contains('is-parameter-scroll')
+    && operatorCard.dataset.parameterReady === 'false'
+  ) {
+    event.preventDefault();
+    dragOverOperatorItemId.value = operatorCard.dataset.itemId;
+    dragOverTrash.value = false;
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = dragPayload.value.kind === 'numeric-constant' ? 'copy' : 'move';
+    }
+    return;
+  }
+
+  if (dragPayload.value.kind === 'arsenal') {
+    const context = operatorDragContext(dragPayload.value.id);
+    if (acceptsArsenalDrop(context, destination)) {
+      event.preventDefault();
+      dragOverTrash.value = false;
+      dragOverOperatorItemId.value = null;
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = context.operator.kind === 'tower' ? 'move' : 'copy';
+      }
+      return;
+    }
+  }
+
+  if (!canDiscardPayload(dragPayload.value) || !closestElement(event.target, '.trash-dropzone')) return;
   event.preventDefault();
   dragOverTrash.value = true;
+  dragOverOperatorItemId.value = null;
   dragOverTowerId.value = null;
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 }
@@ -266,29 +348,60 @@ function handleDragLeave(event) {
     if (dragOverTowerId.value === tower.dataset.recycleTowerId) dragOverTowerId.value = null;
   }
   const bin = closestElement(event.target, '.trash-dropzone');
-  if (!bin || (event.relatedTarget instanceof Node && bin.contains(event.relatedTarget))) return;
-  dragOverTrash.value = false;
+  if (bin && !(event.relatedTarget instanceof Node && bin.contains(event.relatedTarget))) {
+    dragOverTrash.value = false;
+  }
+  const operatorCard = closestElement(event.target, '.operator-card[data-item-id]');
+  if (
+    operatorCard
+    && !(event.relatedTarget instanceof Node && operatorCard.contains(event.relatedTarget))
+    && dragOverOperatorItemId.value === operatorCard.dataset.itemId
+  ) dragOverOperatorItemId.value = null;
 }
 
 function discardPayload({ kind, id }) {
   if (kind === 'arsenal') actions.discardArsenal(id);
-  else if (kind === 'formula') actions.discardFormula(id);
-  else if (kind === 'constant') actions.discardConstant(id);
   else if (kind === 'stored-constant') actions.discardStoredConstant(id);
 }
 
 function handleDrop(event) {
   if (!dragPayload.value) return;
+  const payload = { ...dragPayload.value };
   const tower = closestElement(event.target, '[data-recycle-tower-id]');
-  if (dragPayload.value.kind === 'recycle-tool' && tower) {
+  const destination = dragDestination(event.target);
+  const { operatorCard, cell, enemy } = destination;
+  const arsenalContext = payload.kind === 'arsenal' ? operatorDragContext(payload.id) : null;
+  if (payload.kind === 'recycle-tool' && tower) {
     event.preventDefault();
     actions.recycleTower(tower.dataset.recycleTowerId);
   } else if (
-    trashDiscardKinds.has(dragPayload.value.kind)
+    ['stored-constant', 'numeric-constant'].includes(payload.kind)
+    && operatorCard?.classList.contains('is-parameter-scroll')
+    && operatorCard.dataset.parameterReady === 'false'
+  ) {
+    event.preventDefault();
+    if (payload.kind === 'stored-constant') {
+      actions.inscribeScroll(operatorCard.dataset.itemId, payload.id);
+    } else {
+      actions.inscribeValue(operatorCard.dataset.itemId, payload.id);
+    }
+  } else if (arsenalContext && acceptsArsenalDrop(arsenalContext, destination)) {
+    const { operator } = arsenalContext;
+    event.preventDefault();
+    if (operator.kind === 'tower') {
+      actions.dropTower(payload.id, Number(cell.dataset.row), Number(cell.dataset.column));
+    } else if (operator.kind === 'target') {
+      actions.dropTargetOperator(payload.id, enemy.dataset.enemyId);
+    } else {
+      if (game.selectedOperatorItemId === payload.id) cancelSelection(game);
+      actions.selectArsenal(payload.id);
+    }
+  } else if (
+    canDiscardPayload(payload)
     && closestElement(event.target, '.trash-dropzone')
   ) {
     event.preventDefault();
-    discardPayload(dragPayload.value);
+    discardPayload(payload);
   }
   handleDragEnd();
 }
@@ -302,7 +415,7 @@ function handleRootKeydown(event) {
     return;
   }
   const item = closestElement(event.target, '[data-drag-kind]');
-  if (!item || !trashDiscardKinds.has(item.dataset.dragKind)) return;
+  if (!item || !canDiscardPayload({ kind: item.dataset.dragKind, id: item.dataset.dragId })) return;
   event.preventDefault();
   discardPayload({ kind: item.dataset.dragKind, id: item.dataset.dragId });
 }
@@ -310,6 +423,7 @@ function handleRootKeydown(event) {
 function handleWindowKeydown(event) {
   if (screen.value !== 'game' || pendingConfirmation.value || ['won', 'lost'].includes(game.phase)) return;
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+  if (closestElement(event.target, '.numeric-constant-builder')) return;
   if (event.key === 'Escape') {
     actions.cancel();
     return;
@@ -321,7 +435,9 @@ function handleWindowKeydown(event) {
     && shortcutIndex >= 1
     && shortcutIndex <= OPERATOR_QUEUE_CAPACITY
   ) {
-    const item = game.operatorQueue[shortcutIndex - 1];
+    const item = game.operatorQueue.filter(
+      (candidate) => OPERATORS[candidate.operatorId]?.kind === 'tower',
+    )[shortcutIndex - 1];
     if (item) {
       event.preventDefault();
       actions.selectArsenal(item.id);
@@ -400,7 +516,12 @@ defineExpose({ game, actions, progress });
       @select-level="actions.selectLevel"
     />
 
-    <OperatorDock :state="game" :drag-payload="dragPayload" @select="actions.selectArsenal" />
+    <OperatorDock
+      :state="game"
+      :drag-payload="dragPayload"
+      :drag-over-item-id="dragOverOperatorItemId"
+      @select="actions.selectArsenal"
+    />
 
     <div class="battle-layout">
       <div class="battle-main">
@@ -421,14 +542,12 @@ defineExpose({ game, actions, progress });
 
       <GameWorkbench
         :state="game"
-        :discard-dragging="Boolean(dragPayload && trashDiscardKinds.has(dragPayload.kind))"
+        :discard-dragging="canDiscardPayload(dragPayload)"
         :drag-over="dragOverTrash"
         :drag-payload="dragPayload"
         :recycle-armed="recycleArmed"
-        @pick-formula="actions.pickFormula"
-        @pick-constant="actions.pickConstant"
+        @store-constant="actions.storeConstant"
         @pick-stored-constant="actions.pickStoredConstant"
-        @prepare-assembly="actions.prepareAssembly"
         @toggle-recycle="actions.toggleRecycle"
       />
     </div>

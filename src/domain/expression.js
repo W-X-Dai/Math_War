@@ -272,6 +272,55 @@ export function scaleExpression(expression, factor) {
   });
 }
 
+export function addConstant(expression, amount) {
+  assertFiniteNumber(amount, "added constant");
+  return addExpressions(expression, polynomial(amount));
+}
+
+export function multiplyExpression(expression, factor) {
+  assertFiniteNumber(factor, "multiplier");
+  if (isApproximatelyZero(factor)) throw new RangeError("multiplier must not be zero");
+  return scaleExpression(expression, factor);
+}
+
+export function divideExpression(expression, divisor) {
+  assertFiniteNumber(divisor, "divisor");
+  if (isApproximatelyZero(divisor)) throw new RangeError("divisor must not be zero");
+  return scaleExpression(expression, 1 / divisor);
+}
+
+/**
+ * Return the real square root when it remains representable by this domain.
+ * The current symbolic basis can express roots of a single non-negative
+ * monomial with even powers; sums and transcendental terms need a wider AST.
+ */
+export function squareRootExpression(expression) {
+  const normalized = normalizeExpression(expression);
+  if (isZero(normalized)) return normalized;
+  if (
+    normalized.terms.length !== 1
+    || normalized.exponentials.length > 0
+    || normalized.trigTerms.length > 0
+    || normalized.logTerms.length > 0
+  ) {
+    throw new RangeError("square root requires a single polynomial term");
+  }
+  const [term] = normalized.terms;
+  if (term.coefficient < 0) throw new RangeError("square root requires a non-negative coefficient");
+  const coefficientRoot = Math.sqrt(term.coefficient);
+  if (!Number.isInteger(coefficientRoot)) {
+    throw new RangeError("square root requires a perfect-square coefficient");
+  }
+  if (term.xPower % 2 !== 0 || term.yPower % 2 !== 0) {
+    throw new RangeError("square root requires even powers");
+  }
+  return polynomial({
+    coefficient: coefficientRoot,
+    xPower: term.xPower / 2,
+    yPower: term.yPower / 2,
+  });
+}
+
 export function multiplyByX(expression) {
   const normalized = normalizeExpression(expression);
   if (normalized.exponentials.length > 0 || normalized.trigTerms.length > 0) {
@@ -315,9 +364,11 @@ function differentiationOptions(variableOrOptions, times) {
 }
 
 export function differentiate(expression, variableOrOptions = "x", requestedTimes = 1) {
-  const { variable, times } = differentiationOptions(variableOrOptions, requestedTimes);
+  const options = differentiationOptions(variableOrOptions, requestedTimes);
+  const variable = options.variable === "z" ? "y" : options.variable;
+  const { times } = options;
   if (variable !== "x" && variable !== "y") {
-    throw new RangeError('differentiate variable must be "x" or "y"');
+    throw new RangeError('differentiate variable must be "x", "y", or "z"');
   }
   if (!Number.isInteger(times) || times < 0) {
     throw new RangeError("differentiate times must be a non-negative integer");
@@ -724,7 +775,9 @@ function powerBody(variable, power) {
 }
 
 function polynomialBody(term) {
-  return `${powerBody("x", term.xPower)}${powerBody("y", term.yPower)}`;
+  // `yPower` remains the serialized compatibility key. In the player-facing
+  // notation the second free variable is z, making ∂/∂z distinct from D.
+  return `${powerBody("x", term.xPower)}${powerBody("z", term.yPower)}`;
 }
 
 function exponentialBody(rate) {

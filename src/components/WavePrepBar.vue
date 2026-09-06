@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
+import { OPERATORS } from '../game/content.js';
 import GameIcon from './GameIcon.vue';
 
 const props = defineProps({
@@ -151,12 +152,11 @@ function supplyCount(value) {
 const guaranteedSupply = computed(() => {
   const supply = props.state.currentWave?.guaranteedSupply;
   if (!supply) return null;
-  const counts = {
-    operators: supplyCount(supply.operators ?? supply.arsenal),
-    formulas: supplyCount(supply.formulaIds ?? supply.formulas),
-    constants: supplyCount(supply.constants ?? supply.kValues),
-  };
-  return Object.values(counts).some(Boolean) ? counts : null;
+  const operatorIds = supply.operators ?? supply.arsenal ?? [];
+  const towers = Array.isArray(operatorIds)
+    ? operatorIds.filter((operatorId) => OPERATORS[operatorId]?.kind === 'tower').length
+    : supplyCount(operatorIds);
+  return towers > 0 ? { towers } : null;
 });
 </script>
 
@@ -183,7 +183,7 @@ const guaranteedSupply = computed(() => {
             <span v-if="!laneSummaries.length" class="danger-level">危險度 {{ summary.danger ?? '—' }}</span>
             <span v-if="guaranteedSupply" class="guaranteed-supply-badge">
               <b>保障補給</b>
-              軍械 {{ guaranteedSupply.operators }}・公式 {{ guaranteedSupply.formulas }}・k {{ guaranteedSupply.constants }}
+              砲台牌 {{ guaranteedSupply.towers }}・捲軸無限・參數可直接輸入
             </span>
           </div>
           <ol v-if="laneSummaries.length" class="lane-intel-list" aria-label="各路主要反制情報">

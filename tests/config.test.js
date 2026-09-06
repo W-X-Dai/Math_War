@@ -58,8 +58,12 @@ test('six chapters declare the approved rhythm, order, and guaranteed supply sha
 });
 
 test('operator unlock order and tower versus scroll roles match the curriculum', () => {
-  assert.equal(OPERATORS.derivative.unlockChapter, 0);
+  assert.equal(OPERATORS.add.unlockChapter, 0);
   assert.equal(OPERATORS.subtract.unlockChapter, 0);
+  assert.equal(OPERATORS.derivative.unlockChapter, 1);
+  assert.equal(OPERATORS.multiply.unlockChapter, 1);
+  assert.equal(OPERATORS.divide.unlockChapter, 1);
+  assert.equal(OPERATORS.squareRoot.unlockChapter, 1);
   assert.equal(OPERATORS.secondDerivative.unlockChapter, 1);
   assert.equal(OPERATORS.integral.unlockChapter, 1);
   assert.equal(OPERATORS.eulerTower.unlockChapter, 2);
@@ -69,20 +73,57 @@ test('operator unlock order and tower versus scroll roles match the curriculum',
   assert.equal(OPERATORS.resonanceTower.unlockChapter, 4);
   assert.equal(OPERATORS.definiteIntegralTower.unlockChapter, 4);
   assert.equal(OPERATORS.reflect.unlockChapter, 5);
+  assert.ok(OPERATORS.limit.cost >= OPERATORS.derivative.cost * 5);
+  assert.ok(OPERATORS.partial.cost >= OPERATORS.limit.cost * 2);
+  assert.equal(OPERATORS.partial.symbol, '∂/∂z');
   assert.equal(OPERATORS.secondDerivative.cost, 150);
   assert.equal(OPERATORS.secondDerivative.cooldown, 2.2);
   assert.ok(2 / OPERATORS.secondDerivative.cooldown > 1 / OPERATORS.derivative.cooldown);
   const parameterScrollIds = [
-    'subtract', 'definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower',
+    'add', 'subtract', 'multiply', 'divide', 'definiteIntegralTower',
+    'evaluateTower', 'eulerTower', 'resonanceTower',
   ];
   for (const operatorId of parameterScrollIds) {
     assert.equal(OPERATORS[operatorId].kind, 'target');
     assert.equal(OPERATORS[operatorId].projectile.trajectory, 'drop');
     assert.ok(OPERATORS[operatorId].parameterKeys.length >= 1);
-    assert.ok(OPERATORS[operatorId].cost < OPERATORS.derivative.cost);
   }
+  assert.equal(OPERATORS.squareRoot.kind, 'target');
+  assert.equal(OPERATORS.squareRoot.projectile.trajectory, 'drop');
+  assert.deepEqual(OPERATORS.squareRoot.parameterKeys ?? [], []);
+  assert.equal(OPERATORS.add.cost, 25);
+  assert.equal(OPERATORS.subtract.cost, 25);
+  assert.equal(OPERATORS.multiply.cost, 450);
+  assert.equal(OPERATORS.divide.cost, 300);
+  assert.equal(OPERATORS.squareRoot.cost, 400);
+  assert.ok(OPERATORS.multiply.cost > OPERATORS.add.cost);
+  assert.ok(OPERATORS.divide.cost > OPERATORS.subtract.cost);
+  assert.ok(OPERATORS.squareRoot.cost > OPERATORS.subtract.cost);
   assert.deepEqual(OPERATORS.definiteIntegralTower.parameterKeys, ['lowerBound', 'upperBound']);
   assert.deepEqual(OPERATORS.eulerTower.parameterKeys, ['parameter']);
+});
+
+test('chapter one is a constant-only arithmetic introduction', () => {
+  const chapter = CHAPTERS[0];
+  const tutorial = CHAPTER_TUTORIALS[0];
+  const wave = generateTutorialWave(0);
+
+  assert.deepEqual(chapter.families, ['constant']);
+  assert.ok(chapter.segments.every((segment) => (
+    segment.families.length === 1 && segment.families[0] === 'constant'
+  )));
+  assert.deepEqual(new Set(chapter.starterOperators), new Set(['add', 'subtract']));
+  assert.deepEqual(tutorial.enemyGuideIds, ['constant']);
+  assert.deepEqual(new Set(tutorial.starterOperators), new Set(['add', 'subtract']));
+  assert.deepEqual(tutorial.presetTowers, []);
+  assert.ok(wave.entries.length >= 2);
+  assert.ok(wave.entries.every((entry) => entry.family === 'constant'));
+  assert.ok(wave.entries.every((entry) => {
+    const expression = entry.expression;
+    return expression.terms.length === 1
+      && expression.terms[0].xPower === 0
+      && expression.terms[0].yPower === 0;
+  }));
 });
 
 test('projectile timing and exit boundary preserve the deliberate slow-flight contract', () => {

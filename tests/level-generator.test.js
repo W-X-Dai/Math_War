@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  addConstant,
   addExpressions,
   differentiate,
   isZero,
@@ -9,6 +10,7 @@ import {
   normalizeExpression,
   scaleExpression,
   substituteX,
+  subtractConstant,
 } from '../src/domain/expression.js';
 import { CHAPTERS, FORMULA_CARDS, OPERATORS } from '../src/game/content.js';
 import {
@@ -31,6 +33,8 @@ function basisCount(expression) {
 
 function applyOperator(expression, operator) {
   switch (operator.operatorId) {
+    case 'add': return addConstant(expression, operator.parameter);
+    case 'subtract': return subtractConstant(expression, operator.parameter);
     case 'derivative': return differentiate(expression);
     case 'secondDerivative': return differentiate(expression, 'x', 2);
     case 'evaluateTower': return substituteX(expression, operator.parameter);
@@ -64,7 +68,7 @@ function assertSupplyCovers(wave, chapter) {
   const towerRows = new Set();
   const expectedOperators = wave.counterRequirements.flatMap((requirement) => (
     requirement.operators.flatMap((operator) => {
-      if (!OPERATORS[operator.operatorId].parameterKeys?.length) {
+      if (OPERATORS[operator.operatorId].kind === 'tower') {
         const key = `${requirement.row}:${operator.operatorId}`;
         if (towerRows.has(key)) return [];
         towerRows.add(key);
@@ -96,7 +100,9 @@ function assertFiniteFormula(chapterIndex, segmentIndex, entry) {
   const expression = normalizeExpression(entry.expression);
   if (chapterIndex === 0) {
     assert.equal(expression.terms.length, 1);
-    assert.ok(expression.terms[0].xPower >= 0 && expression.terms[0].xPower <= 2);
+    assert.equal(expression.terms[0].xPower, 0);
+    assert.equal(expression.terms[0].yPower, 0);
+    assert.equal(entry.family, 'constant');
   } else if (chapterIndex === 1) {
     assert.equal(expression.terms.length, 1);
     if (entry.family === 'higherOrder') assert.ok(expression.terms[0].xPower >= 3 && expression.terms[0].xPower <= 5);
@@ -175,6 +181,33 @@ test('finite segment API is deterministic, compatible, and validates coordinates
   assert.throws(() => generateFiniteSegment(1, 0, 0), RangeError);
   assert.throws(() => generateFiniteSegment(1, 0, 3), RangeError);
   assert.throws(() => generateFiniteSegment(1, 0, 1.5), RangeError);
+});
+
+test('chapter one contains constants only and selects add or subtract from their sign', () => {
+  for (let seed = 0; seed < 500; seed += 1) {
+    for (const segmentIndex of [1, 2]) {
+      const wave = generateFiniteSegment(seed, 0, segmentIndex);
+      assert.deepEqual(wave.requiredTags, ['constant']);
+      assert.ok(wave.entries.every((entry) => entry.family === 'constant'));
+
+      for (const requirement of wave.counterRequirements) {
+        assert.equal(requirement.family, 'constant');
+        assert.equal(requirement.operators.length, 1);
+        const [operator] = requirement.operators;
+        assert.ok(['add', 'subtract'].includes(operator.operatorId));
+        assert.ok(operator.parameter > 0);
+
+        const laneEntries = wave.entries.filter((entry) => entry.row === requirement.row);
+        const coefficients = new Set(laneEntries.map((entry) => (
+          normalizeExpression(entry.expression).terms[0].coefficient
+        )));
+        assert.equal(coefficients.size, 1, `unstable constant ${seed}/${segmentIndex}/${requirement.row}`);
+        const [coefficient] = coefficients;
+        assert.equal(operator.operatorId, coefficient < 0 ? 'add' : 'subtract');
+        assert.equal(operator.parameter, Math.abs(coefficient));
+      }
+    }
+  }
 });
 
 test('all formal segments satisfy lane, formula, affix, supply, and summary invariants over 500 seeds', () => {

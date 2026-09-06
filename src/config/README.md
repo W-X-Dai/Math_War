@@ -22,10 +22,12 @@
 ## 調整約束
 
 - 時間、容量、生命與尺寸必須為正值；機率與比例應維持在合理範圍。
-- `operator` queue 容量目前不可超過九張，因鍵盤快捷鍵使用單一數字鍵。
-- 教學起始 queue 不可超過對應容量；正式段的保障補給可暫時超量，隨機補牌必須在 queue 回到容量以下才恢復。
+- 砲台 queue 容量目前不可超過九張，因鍵盤快捷鍵使用單一數字鍵；已解鎖的 target/global 捲軸改由 `scrollLibrary` 無限供應，不佔砲台 queue 容量。
+- 第一章刻意沒有砲台補給，只解鎖 `category: basic` 的加、減捲軸；補牌流程與 UI 必須允許該章的可用砲台集合為空。
+- `category: heavy` 的乘、除、開根屬高算力前處理捲軸。乘數與除數不可為 `0`；開根只接受非負完全平方係數、且 `x`／`z` 次方皆為偶數的單項式。
+- 教學起始砲台 queue 不可超過容量；正式段的保障砲台可暫時超量，隨機補牌必須在 queue 回到容量以下才恢復。
 - 有限章每章必須保有辨識教學，以及 `pressure`、`mixed` 兩個正式段；只有壓力段發放該章一次性的提早開始獎勵。
-- 每個正式段的 `counterRequirements` 必須能由 `guaranteedSupply` 的軍械及逐組公式／`k` 精確組出，不能只提高必要材料的隨機機率；一次性參數捲軸要按本體、護盾與分裂子代的實際施放次數逐張供應。
+- `counterRequirements` 與 `guaranteedSupply.formulaIds/constants` 仍保留為 seeded 關卡可解性與舊資料相容性的描述介面；玩家執行時可把 `0`–`9`、`π`、`e` 圓盤直接拖到參數捲軸，或先在輸入框組合複合參數；無限捲軸也不再逐張加入砲台 queue。
 - 同一路在同一正式段中必須維持同一反制需求；普通敵人最多一種專用反制或兩步組合，有限章每隻敵人最多一種變異。
 - 多變數不額外提高 x 次方；普通三角式保持同頻，普通指數式保持單一成長率，分裂子怪必須沿用原防線可處理的基底。
 - 棋盤必須滿足 `0 < placeableColumns <= columns`。
@@ -33,6 +35,6 @@
 - 生成器數值會影響同 seed 的關卡內容；改動後應更新固定 seed golden test，並把相容影響記錄在 devlog。
 - RNG hash、浮點 epsilon 與數學正規化精度屬演算法不變量，不是平衡參數，刻意留在其實作模組。
 
-`CHAPTERS[].segments[].guaranteedSupply` 是內容側的代表性最低設計規格；實際 finite wave 會依該 seed 的每隻敵人、護盾與分裂子代產生精確 `counterRequirements`，再輸出足量、同參數的 `wave.guaranteedSupply`。可重複攻擊的砲台仍按路線去重，一次性參數捲軸則按施放次數供應。整備 UI 只讀 `summary.lanes` 的函數族、範圍與可能變異，不應顯示 entry 的完整公式、係數或 `spawnAt`。
+`CHAPTERS[].segments[].guaranteedSupply` 是內容側的代表性最低設計規格；實際 finite wave 會依該 seed 的每隻敵人、護盾與分裂子代產生精確 `counterRequirements` 與相容的 `wave.guaranteedSupply`。執行時只把其中的砲台牌加入 queue，捲軸從永久庫取用，參數由鍵盤組合。整備 UI 只讀 `summary.lanes` 的函數族、範圍與可能變異，不應顯示 entry 的完整公式、係數或 `spawnAt`。
 
 設定物件會在載入時遞迴凍結，避免執行期間被 Vue 或遊戲狀態意外改寫。要調整預設值請直接修改設定來源並重新執行 `npm test`。

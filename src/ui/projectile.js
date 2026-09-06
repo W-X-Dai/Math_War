@@ -13,10 +13,24 @@ function clampUnit(value) {
 
 function normalizedTargetLayout(layout) {
   if (!layout) return EMPTY_TARGET_LAYOUT;
+  const rawTargetPosition = Number(layout.targetPosition);
+  const hasTargetPosition = layout.targetPosition !== null
+    && layout.targetPosition !== undefined
+    && Number.isFinite(rawTargetPosition);
   return Object.freeze({
     chipOffset: finiteNumber(layout.chipOffset),
     verticalOffset: finiteNumber(layout.verticalOffset),
+    ...(hasTargetPosition ? { targetPosition: rawTargetPosition } : {}),
   });
+}
+
+function targetLayoutProgress(effect, trajectory, laneX, from, targetPosition, progress) {
+  if (effect?.status === 'impacted') return 1;
+  if (trajectory !== 'lane' || !Number.isFinite(targetPosition)) return progress;
+
+  const distanceToTarget = targetPosition - from;
+  if (distanceToTarget <= 0) return progress;
+  return clampUnit((laneX - from) / distanceToTarget);
 }
 
 export function scalarLabel(value) {
@@ -26,6 +40,23 @@ export function scalarLabel(value) {
 export function subtractLabel(value) {
   if (Number(value) < 0) return `+${formatValue(Math.abs(value))}`;
   return `−${scalarLabel(value)}`;
+}
+
+export function addLabel(value) {
+  if (Number(value) < 0) return `−${formatValue(Math.abs(value))}`;
+  return `+${scalarLabel(value)}`;
+}
+
+export function multiplyLabel(value) {
+  return Number(value) < 0
+    ? `×−${formatValue(Math.abs(value))}`
+    : `×${scalarLabel(value)}`;
+}
+
+export function divideLabel(value) {
+  return Number(value) < 0
+    ? `÷−${formatValue(Math.abs(value))}`
+    : `÷${scalarLabel(value)}`;
 }
 
 export function identityTerm(value) {
@@ -44,9 +75,10 @@ export function projectileProgress(effect) {
 }
 
 /**
- * Calculate the projectile point. Falling shots progressively follow their
- * target card's fan-out; lane shots stay on the physical lane until impact,
- * when the hit pulse adopts the card's final layout.
+ * Calculate the projectile point. Every shot progressively follows its target
+ * card's fan-out. Lane shots use their distance to the current collision
+ * candidate so they reach the displayed card exactly when the physical paths
+ * meet, even though their simulation path remains on the lane.
  */
 export function projectileVisualGeometry(effect, laneY, targetLayout = EMPTY_TARGET_LAYOUT) {
   const trajectory = effect?.trajectory ?? (effect?.type === 'drop-projectile' ? 'drop' : 'lane');
@@ -72,7 +104,14 @@ export function projectileVisualGeometry(effect, laneY, targetLayout = EMPTY_TAR
     && Number.isFinite(rawCurrentPosition)
     ? rawCurrentPosition
     : interpolatedX;
-  const followsTargetLayout = trajectory === 'drop' || effect?.status === 'impacted';
+  const layoutProgress = targetLayoutProgress(
+    effect,
+    trajectory,
+    laneX,
+    from,
+    layout.targetPosition,
+    progress,
+  );
 
   return {
     position,
@@ -80,8 +119,8 @@ export function projectileVisualGeometry(effect, laneY, targetLayout = EMPTY_TAR
     trajectory,
     x: trajectory === 'lane' ? laneX : position,
     y: trajectory === 'drop' ? targetY * progress : targetY,
-    offsetX: followsTargetLayout && progress > 0 ? layout.chipOffset * progress : 0,
-    offsetY: followsTargetLayout && progress > 0 ? layout.verticalOffset * progress : 0,
+    offsetX: layoutProgress > 0 ? layout.chipOffset * layoutProgress : 0,
+    offsetY: layoutProgress > 0 ? layout.verticalOffset * layoutProgress : 0,
   };
 }
 
@@ -119,12 +158,20 @@ export function resolveProjectileTargetLayouts(
  */
 export function projectileLabel(effect) {
   switch (effect?.operatorId) {
+    case 'add':
+      return addLabel(effect.parameter);
     case 'derivative':
       return 'd/dx';
     case 'secondDerivative':
       return 'd²/dx²';
     case 'subtract':
       return subtractLabel(effect.parameter);
+    case 'multiply':
+      return multiplyLabel(effect.parameter);
+    case 'divide':
+      return divideLabel(effect.parameter);
+    case 'squareRoot':
+      return '√';
     case 'definiteIntegralTower':
       return `∫[${scalarLabel(effect.lowerBound)},${scalarLabel(effect.upperBound)}]dx`;
     case 'evaluateTower':
@@ -140,7 +187,7 @@ export function projectileLabel(effect) {
     case 'limit':
       return 'lim x→∞';
     case 'partial':
-      return '∂/∂x';
+      return '∂/∂z';
     default:
       return effect?.label ?? effect?.operatorId ?? '';
   }

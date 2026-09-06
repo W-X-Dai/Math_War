@@ -115,10 +115,22 @@
   box-shadow: inset 0 0 0 1px rgba(127, 211, 179, 0.32), 0 0 14px rgba(127, 211, 179, 0.2);
 }
 
+.grid-cell.is-drag-placeable {
+  border-color: var(--mint);
+  background: rgba(127, 211, 179, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(127, 211, 179, 0.42), 0 0 16px rgba(127, 211, 179, 0.28);
+}
+
 .grid-cell.is-invalid {
   border-color: var(--coral);
   background: rgba(232, 111, 90, 0.14);
   box-shadow: inset 0 0 0 1px rgba(232, 111, 90, 0.3), 0 0 12px rgba(232, 111, 90, 0.18);
+  cursor: not-allowed;
+}
+
+.grid-cell.is-drag-invalid {
+  border-color: var(--coral);
+  background: rgba(232, 111, 90, 0.18);
   cursor: not-allowed;
 }
 
@@ -128,6 +140,10 @@
 
 .battlefield.has-targeting .enemy.is-targetable {
   filter: drop-shadow(0 0 12px rgba(127, 211, 179, 0.8)) drop-shadow(0 9px 6px rgba(0, 0, 0, 0.56));
+}
+
+.battlefield.has-drag-targeting .enemy.is-drag-targetable {
+  filter: drop-shadow(0 0 14px rgba(127, 211, 179, 0.92)) drop-shadow(0 9px 6px rgba(0, 0, 0, 0.56));
 }
 
 .targeting-mode {
@@ -648,6 +664,26 @@
   clip-path: polygon(0 18%, 78% 18%, 100% 50%, 78% 82%, 0 82%, 8% 50%);
 }
 
+.projectile--add {
+  --projectile-color: #8fe0bd;
+  --projectile-fill: rgba(7, 45, 39, 0.97);
+}
+
+.projectile--multiply,
+.projectile--divide,
+.projectile--square-root {
+  --projectile-color: #ffd27d;
+  --projectile-fill: rgba(61, 37, 8, 0.98);
+}
+
+.projectile--multiply .projectile__glyph,
+.projectile--divide .projectile__glyph,
+.projectile--square-root .projectile__glyph {
+  min-width: clamp(48px, 4cqw, 64px);
+  border-width: 2px;
+  font-size: clamp(13px, 1.02cqw, 17px);
+}
+
 .projectile--definite-integral,
 .projectile--indefinite-integral {
   --projectile-color: #8fe0bd;
@@ -708,7 +744,11 @@
 }
 
 .projectile.is-drop:is(
+  .projectile--add,
   .projectile--subtract,
+  .projectile--multiply,
+  .projectile--divide,
+  .projectile--square-root,
   .projectile--definite-integral,
   .projectile--evaluation,
   .projectile--euler,

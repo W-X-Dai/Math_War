@@ -12,25 +12,33 @@ export const FORMULA_QUEUE_CAPACITY = 10;
 export const FORMULA_QUEUE_INTERVAL = 6;
 
 export const OPERATOR_ORDER = deepFreeze([
-  'derivative', 'subtract', 'secondDerivative', 'definiteIntegralTower',
+  'add', 'subtract', 'derivative', 'secondDerivative', 'multiply', 'divide', 'squareRoot',
+  'definiteIntegralTower',
   'integral', 'partial', 'evaluateTower', 'limit', 'eulerTower', 'reflect',
   'resonanceTower',
 ]);
 
 export const OPERATORS = deepFreeze({
+  add: {
+    id: 'add', symbol: 'x＋[ ]', name: '加法捲軸', cost: 25, kind: 'target', category: 'basic',
+    parameterKeys: ['parameter'], projectile: { shape: 'add', trajectory: 'drop' },
+    art: 'parameter-scroll-art', unlockChapter: 0, unlockWave: 0,
+    counterTags: ['constant'],
+    description: '基礎無限捲軸：刻寫 k 後，對單一目標施作 P(x)+k。',
+  },
   derivative: {
     id: 'derivative', symbol: 'D', name: '微分砲', cost: 100, kind: 'tower',
     projectile: { shape: 'derivative', trajectory: 'lane' },
-    cooldown: 1.75, art: 'tower-art-derivative', unlockChapter: 0, unlockWave: 0,
+    cooldown: 1.75, art: 'tower-art-derivative', unlockChapter: 1, unlockWave: 1,
     counterTags: ['polynomial', 'constant', 'higherOrder', 'multivariable', 'logarithmic'],
     description: '同一路每次命中做一次 d/dx，直到公式化為 0。',
   },
   subtract: {
-    id: 'subtract', symbol: 'x−[ ]', name: '參數平移捲軸', cost: 25, kind: 'target',
+    id: 'subtract', symbol: 'x−[ ]', name: '減法捲軸', cost: 25, kind: 'target', category: 'basic',
     parameterKeys: ['parameter'], projectile: { shape: 'subtract', trajectory: 'drop' },
     art: 'parameter-scroll-art', unlockChapter: 0, unlockWave: 0,
     counterTags: ['constant'],
-    description: '一次性參數捲軸：刻寫 k 後，對單一目標施作 P(x)−k。',
+    description: '無限參數捲軸：刻寫 k 後，對單一目標施作 P(x)−k。',
   },
   secondDerivative: {
     id: 'secondDerivative', symbol: 'D²', name: '高階砲', cost: 150, kind: 'tower',
@@ -39,61 +47,82 @@ export const OPERATORS = deepFreeze({
     counterTags: ['higherOrder', 'polynomial', 'constant', 'multivariable'],
     description: '一發連做兩次微分，能跳過危險的中間係數。',
   },
+  multiply: {
+    id: 'multiply', symbol: 'x×[ ]', name: '乘法重型捲軸', cost: 450, kind: 'target', category: 'heavy',
+    parameterKeys: ['parameter'], projectile: { shape: 'multiply', trajectory: 'drop' },
+    art: 'parameter-scroll-art', unlockChapter: 1, unlockWave: 1,
+    counterTags: ['constant', 'polynomial', 'higherOrder', 'multivariable', 'rational'],
+    description: '大型無限捲軸：刻寫非零 k，把單一目標整式乘以 k。',
+  },
+  divide: {
+    id: 'divide', symbol: 'x÷[ ]', name: '除法重型捲軸', cost: 300, kind: 'target', category: 'heavy',
+    parameterKeys: ['parameter'], projectile: { shape: 'divide', trajectory: 'drop' },
+    art: 'parameter-scroll-art', unlockChapter: 1, unlockWave: 1,
+    counterTags: ['constant', 'polynomial', 'higherOrder', 'multivariable', 'rational'],
+    description: '大型無限捲軸：刻寫非零 k，把單一目標整式除以 k。',
+  },
+  squareRoot: {
+    id: 'squareRoot', symbol: '√', name: '開根重型捲軸', cost: 400, kind: 'target', category: 'heavy',
+    projectile: { shape: 'square-root', trajectory: 'drop' },
+    art: 'parameter-scroll-art', unlockChapter: 1, unlockWave: 1,
+    counterTags: ['constant', 'polynomial', 'higherOrder', 'multivariable', 'rational'],
+    description: '大型無限捲軸：對可精確表示的非負完全平方單項式開根。',
+  },
   definiteIntegralTower: {
     id: 'definiteIntegralTower', symbol: '∫[ ]→[ ]', name: '定積分捲軸', cost: 50, kind: 'target',
     parameterKeys: ['lowerBound', 'upperBound'], projectile: { shape: 'definite-integral', trajectory: 'drop' },
     art: 'parameter-scroll-art', unlockChapter: 4, unlockWave: 4,
     counterTags: ['polynomial', 'trigonometric'],
-    description: '一次性雙參數捲軸：依序刻寫下界與上界，把單一目標化成定積分常數。',
+    description: '無限雙參數捲軸：依序刻寫下界與上界，把單一目標化成定積分常數。',
   },
   integral: {
     id: 'integral', symbol: '∫ + C', name: '不定積分', cost: 175, kind: 'target',
     projectile: { shape: 'indefinite-integral', trajectory: 'drop' },
     art: 'combo-art-integral', unlockChapter: 1, unlockWave: 1,
     counterTags: ['higherOrder', 'rational'],
-    description: '一次性：積分後隨機抽 C。降係數、升階數，走投無路時賭一把。',
+    description: '無限捲軸：積分後隨機抽 C。降係數、升階數，走投無路時賭一把。',
   },
   reflect: {
     id: 'reflect', symbol: 'x ↦ −x', name: '輸入反射', cost: 75, kind: 'target',
     projectile: { shape: 'reflection', trajectory: 'drop' },
     art: 'combo-art-reflect', unlockChapter: 5, unlockWave: 5,
     counterTags: ['exponential'],
-    description: '一次性：令 F(x) → F(−x)，可把成長指數變成衰減指數。',
+    description: '無限捲軸：令 F(x) → F(−x)，可把成長指數變成衰減指數。',
   },
   limit: {
-    id: 'limit', symbol: 'lim ∞', name: '無窮極限', cost: 225, kind: 'target',
+    id: 'limit', symbol: 'lim ∞', name: '無窮極限', cost: 600, kind: 'target',
     projectile: { shape: 'limit', trajectory: 'drop' },
     art: 'combo-art-limit', unlockChapter: 2, unlockWave: 2,
     counterTags: ['rational', 'logarithmic', 'exponential'],
-    description: '一次性：有限結果會取代原式；不存在或發散時敵人暴走。',
+    description: '高耗能無限捲軸：有限結果會取代原式；不存在或發散時敵人暴走。',
   },
   partial: {
-    id: 'partial', symbol: '∂/∂x', name: '全場偏微分', cost: 400, kind: 'global',
+    id: 'partial', symbol: '∂/∂z', name: '全場 z 偏微分', cost: 1200, kind: 'global',
     projectile: { shape: 'partial', trajectory: 'drop' },
     art: 'tower-art-partial', unlockChapter: 3, unlockWave: 3,
     counterTags: ['multivariable'],
-    description: '昂貴捲軸：全場對 x 偏微分一次；每輪限用一次。',
+    description: '超高耗能捲軸：全場對 z 偏微分一次；每輪限用一次。',
   },
   evaluateTower: {
     id: 'evaluateTower', symbol: 'f([ ])', name: '代入捲軸', cost: 40, kind: 'target',
     parameterKeys: ['parameter'], projectile: { shape: 'evaluation', trajectory: 'drop' },
     art: 'parameter-scroll-art', unlockChapter: 3, unlockWave: 3,
     counterTags: ['polynomial', 'constant', 'multivariable', 'rational', 'logarithmic', 'trigonometric', 'exponential'],
-    description: '一次性參數捲軸：刻寫 k 後把單一目標代入 x=k；代到根時可直接歸零。',
+    description: '無限參數捲軸：刻寫 k 後把單一目標代入 x=k；代到根時可直接歸零。',
   },
   eulerTower: {
     id: 'eulerTower', symbol: 'xD＋[ ]I', name: 'Euler 捲軸', cost: 40, kind: 'target',
     parameterKeys: ['parameter'], projectile: { shape: 'euler', trajectory: 'drop' },
     art: 'parameter-scroll-art', unlockChapter: 2, unlockWave: 2,
     counterTags: ['polynomial', 'rational', 'logarithmic'],
-    description: '一次性參數捲軸：刻寫 k 後對單一目標施作 xD+kI；適合處理齊次、分式與對數函數。',
+    description: '無限參數捲軸：刻寫 k 後對單一目標施作 xD+kI；適合處理齊次、分式與對數函數。',
   },
   resonanceTower: {
     id: 'resonanceTower', symbol: 'D²＋[ ]I', name: '共振捲軸', cost: 45, kind: 'target',
     parameterKeys: ['parameter'], projectile: { shape: 'resonance', trajectory: 'drop' },
     art: 'parameter-scroll-art', unlockChapter: 4, unlockWave: 4,
     counterTags: ['trigonometric', 'exponential'],
-    description: '一次性參數捲軸：刻寫正確頻率平方後，對單一目標共振消去。',
+    description: '無限參數捲軸：刻寫正確頻率平方後，對單一目標共振消去。',
   },
 });
 
@@ -109,7 +138,7 @@ export const ENEMY_TYPES = deepFreeze({
   shiftedCube: { name: '三次背包獸', art: 'enemy-art-polynomial', family: 'constant', speed: 0.014, reward: 48, create: () => p([term(1, 3), term(30)]) },
   factorial: { name: '階乘巨獸', art: 'enemy-art-brute', family: 'higherOrder', speed: 0.0105, reward: 72, create: () => p([term(1, 5)]) },
   emergency: { name: '高係數浪獸', art: 'enemy-art-wave', family: 'higherOrder', speed: 0.017, reward: 60, create: () => p([term(120, 1)]) },
-  yOnly: { name: '純 y 摺獸', art: 'enemy-art-wave', family: 'multivariable', speed: 0.017, reward: 52, create: () => p([term(1, 0, 4), term(10)]) },
+  yOnly: { name: '純 z 摺獸', art: 'enemy-art-wave', family: 'multivariable', speed: 0.017, reward: 52, create: () => p([term(1, 0, 4), term(10)]) },
   mixed: { name: '雙變數紙獸', art: 'enemy-art-polynomial', family: 'multivariable', speed: 0.012, reward: 70, create: () => p([term(1, 2, 3), term(20)]) },
   exponential: { name: '指數飛蛾', art: 'enemy-art-exponential', family: 'exponential', speed: 0.0135, reward: 110, create: () => exponential(1, 1) },
 });
@@ -138,14 +167,14 @@ const segment = (index, kind, countRange, families, guaranteedSupply) => ({
 
 export const CHAPTERS = Object.freeze([
   chapter({
-    id: 'foundation', name: '基礎防線', theme: '常數與低階多項式', hint: '判斷常數、一次式與二次式，把 D 放在能完成最後一次消去的位置。',
+    id: 'foundation', name: '基礎防線', theme: '整數常數與加減法', hint: '讀出正負常數，用加法或減法把每隻怪物精準化為 0。',
     board: { rows: 4, columns: 7, placeableColumns: 4 }, startingEnergy: 540,
-    spawnInterval: 2.2, families: ['constant', 'polynomial'],
-    starterOperators: ['derivative', 'derivative', 'derivative', 'derivative', 'derivative', 'subtract', 'subtract', 'subtract'],
-    starterFormulaIds: ['identityK', 'doubleK', 'negateK', 'kPlus10'], starterConstants: [0, 1, 2, 5],
+    spawnInterval: 2.2, families: ['constant'],
+    starterOperators: ['add', 'subtract'],
+    starterFormulaIds: ['identityK', 'identityK', 'identityK', 'identityK'], starterConstants: [1, 2, 3, 4],
     segments: [
-      segment(1, 'pressure', [6, 8], ['constant', 'polynomial'], supply(['derivative', 'derivative', 'derivative', 'derivative'])),
-      segment(2, 'mixed', [8, 10], ['constant', 'polynomial'], supply(['derivative', 'derivative', 'derivative', 'derivative'])),
+      segment(1, 'pressure', [6, 8], ['constant'], supply(['add', 'subtract'])),
+      segment(2, 'mixed', [8, 10], ['constant'], supply(['add', 'subtract'])),
     ],
   }),
   chapter({
@@ -234,7 +263,7 @@ export const ENDLESS_CHAPTER = chapter({
   board: { rows: 7, columns: 12, placeableColumns: 7 }, startingEnergy: 1100,
   spawnInterval: 1.12,
   families: ['polynomial', 'constant', 'higherOrder', 'multivariable', 'rational', 'logarithmic', 'trigonometric', 'exponential'],
-  starterOperators: ['derivative', 'secondDerivative', 'definiteIntegralTower', 'limit', 'reflect', 'evaluateTower', 'eulerTower', 'resonanceTower'],
+  starterOperators: ['add', 'subtract', 'derivative', 'secondDerivative', 'multiply', 'divide', 'squareRoot', 'limit'],
   starterFormulaIds: ['identityK', 'doubleK', 'kSquared', 'negSquareK'], starterConstants: [0, 1, 2, Math.PI],
   segments: [segment(1, 'endless', [14, 36], [
     'polynomial', 'constant', 'higherOrder', 'multivariable', 'rational',

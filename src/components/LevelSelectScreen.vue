@@ -132,9 +132,9 @@ function importProgress(event) {
       <div class="level-select-brand">
         <span class="brand-orbit level-select-orbit" aria-hidden="true">∂</span>
         <div>
-          <p class="level-select-kicker">函數塔防演算</p>
+          <p class="level-select-kicker">數學塔防演算</p>
           <h1>微分防線</h1>
-          <p>把進攻的函數化成 0，逐關守住證明核心。</p>
+          <p>把進攻的數字與函數化成 0，逐關守住證明核心。</p>
         </div>
       </div>
       <div class="level-select-progress" aria-label="關卡完成進度">

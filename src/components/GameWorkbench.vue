@@ -1,14 +1,9 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
-import {
-  CONSTANT_QUEUE_CAPACITY,
-  CONSTANT_QUEUE_INTERVAL,
-  FORMULA_QUEUE_CAPACITY,
-  FORMULA_QUEUE_INTERVAL,
-  STORED_CONSTANT_CAPACITY,
-} from '../game/content.js';
-import { constantQueueDetails, currentAssembly, formulaQueueDetails } from '../game/engine.js';
+import { evaluateConstantExpression } from '../domain/constant-expression.js';
+import { STORED_CONSTANT_CAPACITY } from '../game/content.js';
+import { DIRECT_CONSTANT_TOKENS } from '../ui/constant-tokens.js';
 import { formatValue } from '../ui/format.js';
 import GameIcon from './GameIcon.vue';
 
@@ -20,151 +15,95 @@ const props = defineProps({
   recycleArmed: { type: Boolean, default: false },
 });
 
-defineEmits([
-  'pick-formula',
-  'pick-constant',
-  'pick-stored-constant',
-  'prepare-assembly',
-  'toggle-recycle',
-]);
-
-const formulas = computed(() => {
-  const rawItems = new Map((props.state.formulaQueue ?? []).map((item) => [item.id, item]));
-  return formulaQueueDetails(props.state).map((item) => ({
-    ...item,
-    source: item.source ?? rawItems.get(item.id)?.source,
-  }));
-});
-const constants = computed(() => constantQueueDetails(props.state));
-const assembly = computed(() => currentAssembly(props.state));
+const emit = defineEmits(['store-constant', 'pick-stored-constant', 'toggle-recycle']);
+const draft = ref('0');
+const MAX_CONSTANT_ABS = 1_000_000;
 const storedConstants = computed(() => props.state.storedConstants ?? []);
 const selectedStoredConstant = computed(() => storedConstants.value.find(
   (item) => item.id === props.state.selectedStoredConstantId,
 ) ?? null);
-const formulaFull = computed(() => formulas.value.length >= FORMULA_QUEUE_CAPACITY);
-const constantFull = computed(() => constants.value.length >= CONSTANT_QUEUE_CAPACITY);
 const storedFull = computed(() => storedConstants.value.length >= STORED_CONSTANT_CAPACITY);
-const formulaProgress = computed(() => formulaFull.value
-  ? 100
-  : ((FORMULA_QUEUE_INTERVAL - props.state.formulaCooldown) / FORMULA_QUEUE_INTERVAL) * 100);
-const constantProgress = computed(() => constantFull.value
-  ? 100
-  : ((CONSTANT_QUEUE_INTERVAL - props.state.constantCooldown) / CONSTANT_QUEUE_INTERVAL) * 100);
-
-const clampProgress = (value) => Math.max(0, Math.min(100, value));
-
-const supplySourceLabel = (source) => ({
-  guaranteed: '保障補給',
-  random: '隨機補給',
-  starter: '起始補給',
-  tutorial: '教學補給',
-}[source] ?? String(source));
-
-const supplySourceClass = (source) => ({
-  'is-guaranteed': source === 'guaranteed',
-  'is-random': source === 'random',
-  'is-starter': source === 'starter',
-  'is-tutorial': source === 'tutorial',
+const evaluation = computed(() => {
+  try {
+    const value = evaluateConstantExpression(draft.value);
+    if (Math.abs(value) > MAX_CONSTANT_ABS) {
+      return { value: null, error: '結果絕對值不得超過 1,000,000' };
+    }
+    return { value, error: '' };
+  } catch (error) {
+    return { value: null, error: error instanceof Error ? error.message : '算式無效' };
+  }
 });
+const numericValue = computed(() => evaluation.value.value);
+
+function appendToken(token) {
+  if (draft.value.length >= 80) return;
+  const replaceZero = draft.value === '0' && !['.', '+', '−', '×', '÷', ')'].includes(token);
+  draft.value = replaceZero ? token : `${draft.value}${token}`;
+}
+
+function backspace() {
+  if (draft.value.length <= 1) {
+    draft.value = '0';
+    return;
+  }
+  draft.value = draft.value.slice(0, -1);
+}
+
+function saveConstant() {
+  if (numericValue.value === null || storedFull.value) return;
+  emit('store-constant', numericValue.value, `算式 ${draft.value}`);
+}
 </script>
 
 <template>
-  <aside
-    class="workbench"
-    data-bind="workbench"
-    aria-labelledby="workbench-heading"
-    :style="{ '--stored-constant-capacity': STORED_CONSTANT_CAPACITY }"
-  >
+  <aside class="workbench" data-bind="workbench" aria-labelledby="workbench-heading" :style="{ '--stored-constant-capacity': STORED_CONSTANT_CAPACITY }">
     <div class="workbench-title">
-      <h2 id="workbench-heading">公式工坊</h2>
-      <span>{{ formulas.length }} × {{ constants.length }} = {{ formulas.length * constants.length }} 種組合</span>
+      <h2 id="workbench-heading">公式工房</h2>
+      <span>數字・π・e</span>
     </div>
 
-    <div class="queue-columns">
-      <section class="constant-queue" aria-label="上帝常數 queue">
-        <div class="queue-head"><h3>上帝常數 k</h3><strong>{{ constants.length }} / {{ CONSTANT_QUEUE_CAPACITY }}</strong></div>
-        <ol class="queue-track">
-          <template v-if="constants.length">
-            <li v-for="(item, index) in constants" :key="item.id">
-              <button
-                class="constant-token"
-                :class="{
-                  'is-top': index === 0,
-                  'is-picked': item.selected,
-                  'is-dragging': dragPayload?.kind === 'constant' && dragPayload.id === item.id,
-                  'has-source': Boolean(item.source),
-                }"
-                type="button"
-                data-action="pick-constant"
-                :data-item-id="item.id"
-                data-drag-kind="constant"
-                :data-drag-id="item.id"
-                draggable="true"
-                aria-keyshortcuts="Delete"
-                :aria-pressed="item.selected"
-                @click="$emit('pick-constant', item.id)"
-              >
-                <span>{{ index + 1 }}</span><strong><i>k</i> = {{ formatValue(item.value) }}</strong>
-                <span
-                  v-if="item.source"
-                  class="supply-source-badge"
-                  :class="supplySourceClass(item.source)"
-                >{{ supplySourceLabel(item.source) }}</span>
-              </button>
-            </li>
-          </template>
-          <li v-else class="queue-card is-empty">等待 k⋯</li>
-        </ol>
-        <div class="queue-cooldown">
-          <span>{{ constantFull ? '已滿，暫停' : `${state.constantCooldown.toFixed(1)}s` }}</span>
-          <i><b :style="{ width: `${clampProgress(constantProgress)}%` }"></b></i>
-        </div>
-      </section>
-
-      <section class="formula-queue" aria-label="公式 queue">
-        <div class="queue-head"><h3>公式</h3><strong>{{ formulas.length }} / {{ FORMULA_QUEUE_CAPACITY }}</strong></div>
-        <ol class="queue-track">
-          <template v-if="formulas.length">
-            <li v-for="(card, index) in formulas" :key="card.id">
-              <button
-                class="formula-token"
-                :class="{
-                  'is-top': index === 0,
-                  'is-picked': card.selected,
-                  'is-dragging': dragPayload?.kind === 'formula' && dragPayload.id === card.id,
-                  'has-source': Boolean(card.source),
-                }"
-                type="button"
-                data-action="pick-formula"
-                :data-item-id="card.id"
-                data-drag-kind="formula"
-                :data-drag-id="card.id"
-                draggable="true"
-                aria-keyshortcuts="Delete"
-                :aria-pressed="card.selected"
-                @click="$emit('pick-formula', card.id)"
-              >
-                <span>{{ index + 1 }}</span><strong>{{ card.label }}</strong><small>→ {{ card.value === null ? '—' : formatValue(card.value) }}</small>
-                <span
-                  v-if="card.source"
-                  class="supply-source-badge"
-                  :class="supplySourceClass(card.source)"
-                >{{ supplySourceLabel(card.source) }}</span>
-              </button>
-            </li>
-          </template>
-          <li v-else class="queue-card is-empty">等待公式⋯</li>
-        </ol>
-        <div class="queue-cooldown">
-          <span>{{ formulaFull ? '已滿，暫停' : `${state.formulaCooldown.toFixed(1)}s` }}</span>
-          <i><b :style="{ width: `${clampProgress(formulaProgress)}%` }"></b></i>
-        </div>
-      </section>
-    </div>
-
-    <section class="stored-constant-library" aria-label="已組裝常數庫">
+    <section class="numeric-constant-builder" aria-labelledby="numeric-builder-heading">
       <div class="queue-head">
-        <h3>已組裝常數</h3>
+        <h3 id="numeric-builder-heading">常數圓盤</h3>
+        <strong>點擊組合・拖曳刻寫</strong>
+      </div>
+      <label class="numeric-display">
+        <span class="sr-only">常數算式</span>
+        <input v-model="draft" type="text" inputmode="text" autocomplete="off" spellcheck="false" maxlength="80" placeholder="例：-4、2π、\sqrt{81} ÷ 3" aria-describedby="numeric-builder-status" @keydown.enter="saveConstant">
+        <strong>{{ numericValue === null ? '無效' : formatValue(numericValue) }}</strong>
+      </label>
+      <div class="numeric-keypad" aria-label="0 到 9、π 與 e 常數圓盤">
+        <button
+          v-for="token in DIRECT_CONSTANT_TOKENS"
+          :key="token.id"
+          class="numeric-disc"
+          :class="{ 'is-dragging': dragPayload?.kind === 'numeric-constant' && dragPayload.id === token.id }"
+          type="button"
+          :data-key="token.input"
+          data-drag-kind="numeric-constant"
+          :data-drag-id="token.id"
+          draggable="true"
+          :aria-label="`${token.label}；可拖到空白參數捲軸`"
+          :title="`拖到空白參數捲軸刻寫 ${token.label}`"
+          @click="appendToken(token.input)"
+        >{{ token.label }}</button>
+      </div>
+      <div class="numeric-edit-actions" aria-label="算式編輯">
+        <button type="button" data-key="backspace" aria-label="退格" @click="backspace">⌫ 退格</button>
+        <button type="button" data-key="clear" aria-label="清除" @click="draft = '0'">C 清除</button>
+      </div>
+      <p id="numeric-builder-status" class="numeric-builder-status">
+        {{ numericValue === null ? evaluation.error : `點擊可組合 ${formatValue(numericValue)}；圓盤可直接拖到捲軸` }}
+      </p>
+      <button class="primary-button numeric-save" type="button" data-action="store-numeric-constant" :disabled="numericValue === null || storedFull" @click="saveConstant">
+        {{ storedFull ? `常數庫已滿（${STORED_CONSTANT_CAPACITY}/${STORED_CONSTANT_CAPACITY}）` : '組合並存入常數' }}
+      </button>
+    </section>
+
+    <section class="stored-constant-library" aria-label="已組合常數庫">
+      <div class="queue-head">
+        <h3>已組合常數</h3>
         <strong>{{ storedConstants.length }} / {{ STORED_CONSTANT_CAPACITY }}</strong>
       </div>
       <div class="stored-constant-grid">
@@ -173,10 +112,7 @@ const supplySourceClass = (source) => ({
             v-for="(item, index) in storedConstants"
             :key="item.id"
             class="stored-constant-token"
-            :class="{
-              'is-picked': item.id === state.selectedStoredConstantId,
-              'is-dragging': dragPayload?.kind === 'stored-constant' && dragPayload.id === item.id,
-            }"
+            :class="{ 'is-picked': item.id === state.selectedStoredConstantId, 'is-dragging': dragPayload?.kind === 'stored-constant' && dragPayload.id === item.id }"
             type="button"
             data-action="pick-stored-constant"
             :data-item-id="item.id"
@@ -185,83 +121,30 @@ const supplySourceClass = (source) => ({
             draggable="true"
             aria-keyshortcuts="Delete"
             :aria-pressed="item.id === state.selectedStoredConstantId"
-            :aria-label="`已組裝常數 ${formatValue(item.value)}，${item.source ?? '無來源'}${item.id === state.selectedStoredConstantId ? '，已選取' : ''}`"
+            :title="`拖到需要參數的捲軸刻寫 ${formatValue(item.value)}`"
             @click="$emit('pick-stored-constant', item.id)"
           >
             <span class="stored-constant-index">{{ index + 1 }}</span>
             <strong>{{ formatValue(item.value) }}</strong>
-            <small
-              v-if="item.source"
-              class="supply-source-badge is-stored-source"
-              :class="supplySourceClass(item.source)"
-            >{{ supplySourceLabel(item.source) }}</small>
-            <small v-else>自訂組合</small>
+            <small>{{ item.source ?? '數字鍵盤' }}</small>
           </button>
         </template>
-        <p v-else class="stored-constant-empty">組合公式與 k，最多保存 {{ STORED_CONSTANT_CAPACITY }} 個常數。</p>
+        <p v-else class="stored-constant-empty">用上方數字鍵盤組合參數，最多保存 {{ STORED_CONSTANT_CAPACITY }} 個。</p>
       </div>
-    </section>
-
-    <section
-      class="assembly-preview"
-      :class="{ 'is-empty': !assembly && !selectedStoredConstant, 'has-cartridge': selectedStoredConstant }"
-    >
-      <template v-if="assembly">
-        <div>
-          <span>{{ assembly.formula.label }}</span>
-          <b class="assembly-arrow">｜k = {{ formatValue(assembly.constant.value) }} ⇒</b>
-          <strong>{{ formatValue(assembly.value) }}</strong>
-        </div>
-        <button
-          class="primary-button"
-          type="button"
-          data-action="prepare-assembly"
-          :disabled="storedFull"
-          :title="storedFull ? '常數庫已滿，請先安裝或丟棄一個常數' : '將組合結果保存到常數庫'"
-          @click="$emit('prepare-assembly')"
-        >{{ storedFull ? `常數庫已滿（${STORED_CONSTANT_CAPACITY}/${STORED_CONSTANT_CAPACITY}）` : '組裝並保存' }}</button>
-      </template>
-      <p v-else>兩條 queue 都有材料時即可組合；已組裝常數會在同一關的正式段之間保存。</p>
       <div v-if="selectedStoredConstant" class="selected-constant-hint">
-        <span>已選常數</span>
-        <strong>{{ formatValue(selectedStoredConstant.value) }}</strong>
-        <small>點擊軍械 Queue 中的參數捲軸刻寫</small>
+        <span>已選常數</span><strong>{{ formatValue(selectedStoredConstant.value) }}</strong><small>拖到參數捲軸刻寫；鍵盤可直接點擊捲軸</small>
       </div>
     </section>
 
     <section class="recycle-toolbox" aria-labelledby="recycle-tool-heading">
-      <div>
-        <h3 id="recycle-tool-heading">砲塔回收</h3>
-        <p>拖曳鏟子到砲塔，或先啟用再點選；返還原價一半算力。</p>
-      </div>
-      <button
-        class="recycle-tool"
-        :class="{
-          'is-armed': recycleArmed,
-          'is-dragging': dragPayload?.kind === 'recycle-tool',
-        }"
-        type="button"
-        data-action="toggle-recycle"
-        data-drag-kind="recycle-tool"
-        data-drag-id="shovel"
-        draggable="true"
-        :aria-pressed="recycleArmed"
-        :aria-label="recycleArmed ? '回收模式已啟用；點擊砲塔回收，按 Escape 取消' : '啟用砲塔回收模式；也可把鏟子拖到砲塔上'"
-        @click="$emit('toggle-recycle')"
-      >
-        <GameIcon name="shovel" />
-        <span>{{ recycleArmed ? '選擇砲塔' : '回收鏟' }}</span>
-        <small>{{ recycleArmed ? 'Esc 取消' : '返還 50%' }}</small>
+      <div><h3 id="recycle-tool-heading">砲塔回收</h3><p>拖曳鏟子到砲塔，或先啟用再點選；返還原價一半算力。</p></div>
+      <button class="recycle-tool" :class="{ 'is-armed': recycleArmed, 'is-dragging': dragPayload?.kind === 'recycle-tool' }" type="button" data-action="toggle-recycle" data-drag-kind="recycle-tool" data-drag-id="shovel" draggable="true" :aria-pressed="recycleArmed" @click="$emit('toggle-recycle')">
+        <GameIcon name="shovel" /><span>{{ recycleArmed ? '選擇砲塔' : '回收鏟' }}</span><small>{{ recycleArmed ? 'Esc 取消' : '返還 50%' }}</small>
       </button>
     </section>
 
-    <div
-      class="trash-dropzone"
-      :class="{ 'is-active': discardDragging, 'is-over': dragOver }"
-      role="region"
-      aria-label="垃圾桶；把軍械、公式、上帝常數或已組裝常數拖到這裡丟棄"
-    >
-      <GameIcon name="trash" /><span>拖到這裡丟棄</span><small>軍械／公式／k／已組裝常數 · 鍵盤可按 Delete</small>
+    <div class="trash-dropzone" :class="{ 'is-active': discardDragging, 'is-over': dragOver }" role="region" aria-label="垃圾桶；把砲台牌或已組合常數拖到這裡丟棄">
+      <GameIcon name="trash" /><span>拖到這裡丟棄</span><small>砲台牌／已組合常數 · 鍵盤可按 Delete</small>
     </div>
   </aside>
 </template>

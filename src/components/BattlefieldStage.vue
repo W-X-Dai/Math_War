@@ -12,8 +12,11 @@ import {
 } from '../ui/enemy-card.js';
 import { formatValue, prettyFormula } from '../ui/format.js';
 import {
+  addLabel,
+  divideLabel,
   isProjectileEffect,
   identityTerm,
+  multiplyLabel,
   projectileLabel,
   projectileVisualGeometry,
   resolveProjectileTargetLayouts,
@@ -48,7 +51,23 @@ const cells = computed(() => Array.from({ length: board.value.rows * board.value
 })));
 
 const targetingItem = computed(() => (
-  props.state.operatorQueue?.find((item) => item.id === props.state.selectedOperatorItemId) ?? null
+  [...(props.state.operatorQueue ?? []), ...(props.state.scrollLibrary ?? [])]
+    .find((item) => item.id === props.state.selectedOperatorItemId) ?? null
+));
+const draggedArsenalItem = computed(() => {
+  if (props.dragPayload?.kind !== 'arsenal') return null;
+  return [...(props.state.operatorQueue ?? []), ...(props.state.scrollLibrary ?? [])]
+    .find((item) => item.id === props.dragPayload.id) ?? null;
+});
+const draggedOperator = computed(() => (
+  draggedArsenalItem.value ? OPERATORS[draggedArsenalItem.value.operatorId] : null
+));
+const draggingTower = computed(() => draggedOperator.value?.kind === 'tower');
+const draggingTargetOperator = computed(() => (
+  draggedOperator.value?.kind === 'target'
+  && (draggedOperator.value.parameterKeys ?? []).every((key) => (
+    draggedArsenalItem.value[key] !== null && draggedArsenalItem.value[key] !== undefined
+  ))
 ));
 const recycleTargeting = computed(() => (
   props.recycleArmed || props.dragPayload?.kind === 'recycle-tool'
@@ -72,7 +91,6 @@ const enemyPresentation = computed(() => {
   for (const [row, enemies] of byRow) {
     const ordered = [...enemies].sort((a, b) => (
       (Number(a.position) || 0) - (Number(b.position) || 0)
-      || String(a.id).localeCompare(String(b.id))
     ));
     let group = [];
 
@@ -107,6 +125,7 @@ const enemyPresentation = computed(() => {
           order: index,
           row,
           clusterSize: group.length,
+          targetPosition: Number(enemyItem.position) || 0,
           chipOffset: horizontalStart + index * offsetStep,
           verticalOffset: verticalStart + index * verticalStep,
         });
@@ -212,7 +231,10 @@ function targetingLabel() {
   const item = targetingItem.value;
   if (!item) return OPERATORS[props.state.targetingOperator]?.name ?? '單體算子';
   const value = (key) => formatValue(item[key]);
+  if (item.operatorId === 'add') return `P(x)${addLabel(item.parameter)}`;
   if (item.operatorId === 'subtract') return `P(x)${subtractLabel(item.parameter)}`;
+  if (item.operatorId === 'multiply') return `P(x)${multiplyLabel(item.parameter)}`;
+  if (item.operatorId === 'divide') return `P(x)${divideLabel(item.parameter)}`;
   if (item.operatorId === 'definiteIntegralTower') return `∫[${value('lowerBound')}, ${value('upperBound')}]`;
   if (item.operatorId === 'evaluateTower') return `f(${value('parameter')})`;
   if (item.operatorId === 'eulerTower') return `xD${identityTerm(item.parameter)}`;
@@ -227,9 +249,11 @@ function enemyLabel(enemyItem) {
     hasAffix(enemyItem, 'split') ? '分裂變異' : null,
   ].filter(Boolean);
   const mutationText = mutations.length ? `，${mutations.join('、')}` : '';
-  const action = props.state.targetingOperator
-    ? `點擊施作 ${targetingLabel()}`
-    : '點擊查看公式';
+  const action = draggingTargetOperator.value
+    ? `放開以施作 ${draggedOperator.value.name}`
+    : props.state.targetingOperator
+      ? `點擊施作 ${targetingLabel()}`
+      : '點擊查看公式';
   if (enemyItem.shieldExpression) {
     return `${enemyType(enemyItem).name}，${familyLabel(enemyItem)}${mutationText}，等式護盾 ${formulaText(enemyItem.shieldExpression)}，護盾後方本體 ${body}，本體攻擊 ${enemyThreat(enemyItem)}，${action}`;
   }
@@ -300,6 +324,7 @@ function effectStyle(effect) {
       :style="boardStyle"
       :class="{
         'has-targeting': Boolean(state.targetingOperator),
+        'has-drag-targeting': draggingTargetOperator,
         'has-recycle-targeting': recycleTargeting,
         'is-paused': state.paused,
       }"
@@ -321,6 +346,8 @@ function effectStyle(effect) {
             'is-path-only': !cell.placement,
             'is-placeable': cell.placement && Boolean(state.selectedOperator) && !occupied(cell.row, cell.column),
             'is-invalid': cell.placement && Boolean(state.selectedOperator) && occupied(cell.row, cell.column),
+            'is-drag-placeable': cell.placement && draggingTower && !occupied(cell.row, cell.column),
+            'is-drag-invalid': cell.placement && draggingTower && occupied(cell.row, cell.column),
           }"
           type="button"
           :disabled="!cell.placement"
@@ -377,6 +404,7 @@ function effectStyle(effect) {
           :class="{
             'is-selected': state.selectedEnemyId === enemyItem.id,
             'is-targetable': Boolean(state.targetingOperator),
+            'is-drag-targetable': draggingTargetOperator,
             'is-divergent': enemyItem.divergentTimer > 0,
             'is-hit': enemyItem.hitFlash > 0,
             'has-shield': Boolean(enemyItem.shieldExpression),
@@ -447,8 +475,8 @@ function effectStyle(effect) {
           <button class="icon-button" type="button" data-action="dismiss-tutorial" aria-label="關閉教學" @click="$emit('dismiss-tutorial')">
             <GameIcon name="close" />
           </button>
-          <strong>{{ state.currentWave?.kind === 'tutorial' ? '固定教學波・預置砲塔已鎖定' : '先從軍械 Queue 選一張 D' }}</strong>
-          <p>{{ state.currentWave?.kind === 'tutorial' ? (state.currentWave?.objective ?? '觀察新敵人，使用預置軍械將公式化為 0。') : '砲台只攻擊同一路；卡片成功使用才會消耗。注意敵人的函數族與變異徽章。' }}</p>
+          <strong>{{ state.currentWave?.kind === 'tutorial' ? '固定教學波・依提示選擇軍械' : '從軍械庫選擇適合的算子' }}</strong>
+          <p>{{ state.currentWave?.kind === 'tutorial' ? (state.currentWave?.objective ?? '觀察新敵人，使用指定軍械將公式化為 0。') : '第一關用加減捲軸精準消去常數；後續砲台只攻擊同一路。注意敵人的函數族與變異徽章。' }}</p>
           <button class="secondary-button" type="button" data-action="dismiss-tutorial" @click="$emit('dismiss-tutorial')">知道了</button>
         </article>
       </div>

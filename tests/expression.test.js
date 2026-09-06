@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  addConstant,
   addExpressions,
   cloneExpression,
   damage,
   definiteIntegral,
+  divideExpression,
   differentiate,
   exponential,
   evaluateAt,
@@ -15,15 +17,47 @@ import {
   isZero,
   limitAtInfinity,
   logarithm,
+  multiplyExpression,
   multiplyByX,
   normalizeExpression,
   polynomial,
   reflectInput,
   scaleExpression,
+  squareRootExpression,
   substituteX,
   subtractConstant,
   trigonometric,
 } from "../src/domain/expression.js";
+
+test("constant arithmetic operators preserve exact expression semantics", () => {
+  const monomial = polynomial([{ coefficient: 9, xPower: 4, yPower: 2 }]);
+
+  assert.equal(formatExpression(addConstant(polynomial(-5), 5)), "0");
+  assert.equal(formatExpression(multiplyExpression(monomial, -2)), "-18x^4z^2");
+  assert.equal(formatExpression(divideExpression(monomial, 3)), "3x^4z^2");
+  assert.equal(formatExpression(squareRootExpression(monomial)), "3x^2z");
+  assert.equal(formatExpression(squareRootExpression(polynomial(0))), "0");
+});
+
+test("heavy arithmetic rejects zero operands and non-representable square roots", () => {
+  const constant = polynomial(4);
+
+  assert.throws(() => multiplyExpression(constant, 0), /zero|0/i);
+  assert.throws(() => divideExpression(constant, 0), /zero|0/i);
+  assert.throws(() => squareRootExpression(polynomial(-4)), /negative|non-negative/i);
+  assert.throws(() => squareRootExpression(polynomial(2)), /perfect[- ]square|represent/i);
+  assert.throws(
+    () => squareRootExpression(polynomial([{ coefficient: 4, xPower: 3, yPower: 0 }])),
+    /even|represent/i,
+  );
+  assert.throws(
+    () => squareRootExpression(polynomial([
+      { coefficient: 4, xPower: 2, yPower: 0 },
+      { coefficient: 1, xPower: 0, yPower: 0 },
+    ])),
+    /single|monomial|represent/i,
+  );
+});
 
 test("x^5 needs six derivatives and reaches coefficient damage 120", () => {
   let enemy = polynomial([{ coefficient: 1, xPower: 5 }]);
@@ -121,17 +155,17 @@ test("integrating e^x keeps its exponential coefficient and adds C damage", () =
   assert.equal(formatExpression(reflectedLimit.expression), "-5");
 });
 
-test("partial differentiation in x and y handles multivariable terms", () => {
+test("partial differentiation in x and z handles multivariable terms", () => {
   const enemy = polynomial([
     { coefficient: 3, xPower: 2, yPower: 3 },
     { coefficient: 4, xPower: 0, yPower: 1 },
   ]);
 
-  assert.equal(formatExpression(enemy), "3x^2y^3 + 4y");
-  assert.equal(formatExpression(differentiate(enemy, "x")), "6xy^3");
+  assert.equal(formatExpression(enemy), "3x^2z^3 + 4z");
+  assert.equal(formatExpression(differentiate(enemy, "x")), "6xz^3");
   assert.equal(
-    formatExpression(differentiate(enemy, { variable: "y", times: 2 })),
-    "18x^2y",
+    formatExpression(differentiate(enemy, { variable: "z", times: 2 })),
+    "18x^2z",
   );
 });
 
@@ -149,7 +183,7 @@ test("normalization combines like terms and coefficient damage uses L1", () => {
     ],
   });
 
-  assert.equal(formatExpression(expression), "e^-x - 3xy");
+  assert.equal(formatExpression(expression), "e^-x - 3xz");
   assert.equal(damage(expression), 4);
 });
 
@@ -158,8 +192,8 @@ test("cloneExpression does not share mutable term objects", () => {
   const clone = cloneExpression(original);
 
   clone.terms[0].coefficient = 99;
-  assert.equal(formatExpression(original), "2x^2y");
-  assert.equal(formatExpression(clone), "99x^2y");
+  assert.equal(formatExpression(original), "2x^2z");
+  assert.equal(formatExpression(clone), "99x^2z");
 });
 
 test("a finite limit preserves terms independent of x", () => {
@@ -170,7 +204,7 @@ test("a finite limit preserves terms independent of x", () => {
   const limit = limitAtInfinity(expression);
 
   assert.equal(limit.status, "finite");
-  assert.equal(formatExpression(limit.expression), "3y^2");
+  assert.equal(formatExpression(limit.expression), "3z^2");
 });
 
 test("evaluateAt evaluates multivariable polynomial and exponential terms", () => {
@@ -186,12 +220,12 @@ test("evaluateAt evaluates multivariable polynomial and exponential terms", () =
   assert.equal(evaluateAt(expression, 2, 4), 35 + Math.exp(-2));
 });
 
-test("substituteX preserves y while f(0) can still annihilate an x factor", () => {
+test("substituteX preserves z while f(0) can still annihilate an x factor", () => {
   const xySquared = polynomial([{ coefficient: 1, xPower: 1, yPower: 2 }]);
 
-  assert.equal(formatExpression(substituteX(xySquared, 1)), "y^2");
+  assert.equal(formatExpression(substituteX(xySquared, 1)), "z^2");
   assert.equal(formatExpression(substituteX(xySquared, 0)), "0");
-  assert.equal(formatExpression(differentiate(xySquared)), "y^2");
+  assert.equal(formatExpression(differentiate(xySquared)), "z^2");
   assert.equal(isZero(differentiate(xySquared, "x", 2)), true);
 });
 

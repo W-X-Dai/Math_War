@@ -293,29 +293,25 @@
   }
 
   .operator-scroll {
-    display: flex;
+    display: grid;
     width: 100%;
-    gap: 7px;
-    padding: 2px 2px 7px;
-    overflow-x: auto;
+    grid-template-columns: repeat(auto-fit, minmax(48px, 1fr));
+    gap: 5px;
+    padding: 2px;
+    overflow: visible;
     pointer-events: auto;
-    scroll-snap-type: none;
   }
 
-  .operator-card {
-    width: 132px;
-    min-width: 132px;
-    height: 104px;
-    padding: 6px;
-    scroll-snap-align: none;
+  .operator-libraries {
+    grid-template-columns: minmax(210px, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .operator-dock {
+    --operator-token-size: 48px;
   }
 
   .operator-empty {
-    min-height: 104px;
-  }
-
-  .operator-desc {
-    display: none;
+    min-height: 92px;
   }
 
   .workbench {
@@ -424,6 +420,28 @@
   .battle-layout > .operator-dock,
   .battle-stage > .operator-dock {
     left: 8px;
+  }
+
+  .operator-libraries {
+    grid-template-columns: minmax(142px, 0.72fr) minmax(0, 1.28fr);
+    gap: 7px;
+  }
+
+  .operator-library--scroll-library {
+    padding-left: 6px;
+  }
+
+  .dock-heading {
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+  }
+
+  .dock-selection-hint {
+    display: none;
+  }
+
+  .arsenal-cooldown {
+    grid-template-columns: auto minmax(60px, 1fr);
   }
 
   .battle-grid {

@@ -59,7 +59,7 @@ function suppliedParameters(wave) {
 function requiredGuaranteedOperators(wave) {
   const towerRows = new Set();
   return wave.counterRequirements.flatMap((requirement) => requirement.operators.flatMap((operator) => {
-    if (!OPERATORS[operator.operatorId].parameterKeys?.length) {
+    if (OPERATORS[operator.operatorId].kind === 'tower') {
       const key = `${requirement.row}:${operator.operatorId}`;
       if (towerRows.has(key)) return [];
       towerRows.add(key);
@@ -100,6 +100,59 @@ test('D is the cheap, fast choice for low order while D² wins high-order reduct
       < (derivativeHits - 1) * derivative.cooldown,
     'one D² tower must reduce a fifth-order enemy faster than one D tower firing twice per reduction',
   );
+});
+
+test('chapter one is a tower-free constant curriculum with basic add and subtract counters', () => {
+  assert.deepEqual(
+    Object.values(OPERATORS)
+      .filter((operator) => operator.kind === 'tower' && operator.unlockChapter === 0),
+    [],
+  );
+  assert.deepEqual(
+    Object.values(OPERATORS)
+      .filter((operator) => operator.unlockChapter === 0)
+      .map((operator) => operator.id)
+      .sort(),
+    ['add', 'subtract'],
+  );
+
+  for (const segmentIndex of [1, 2]) {
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const wave = generateFiniteSegment(seed, 0, segmentIndex);
+      assert.ok(wave.entries.every((entry) => entry.family === 'constant'));
+      for (const entry of wave.entries) {
+        assert.equal(entry.expression.terms.length, 1);
+        assert.equal(entry.expression.terms[0].xPower, 0);
+        assert.equal(entry.expression.terms[0].yPower, 0);
+      }
+      for (const requirement of wave.counterRequirements) {
+        assert.ok(requirement.operators.every(({ operatorId }) => (
+          operatorId === 'add' || operatorId === 'subtract'
+        )));
+      }
+    }
+  }
+});
+
+test('heavy arithmetic scrolls unlock after the basics and carry a substantial energy premium', () => {
+  assert.equal(OPERATORS.add.category, 'basic');
+  assert.equal(OPERATORS.subtract.category, 'basic');
+  assert.equal(OPERATORS.add.cost, 25);
+  assert.equal(OPERATORS.subtract.cost, 25);
+
+  for (const [operatorId, cost] of [
+    ['multiply', 450],
+    ['divide', 300],
+    ['squareRoot', 400],
+  ]) {
+    const operator = OPERATORS[operatorId];
+    assert.equal(operator.category, 'heavy');
+    assert.equal(operator.unlockChapter, 1);
+    assert.equal(operator.kind, 'target');
+    assert.equal(operator.projectile.trajectory, 'drop');
+    assert.equal(operator.cost, cost);
+    assert.ok(operator.cost >= OPERATORS.add.cost * 10);
+  }
 });
 
 test('parameter scrolls preserve specialist math without occupying a lane slot', () => {

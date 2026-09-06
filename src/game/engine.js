@@ -1,16 +1,20 @@
 import {
+  addConstant,
   addExpressions,
   cloneExpression,
   damage,
   definiteIntegral,
   differentiate,
+  divideExpression,
   formatExpression,
   integrate,
   isZero,
   limitAtInfinity,
   multiplyByX,
+  multiplyExpression,
   reflectInput,
   scaleExpression,
+  squareRootExpression,
   substituteX,
   subtractConstant,
 } from '../domain/expression.js';
@@ -76,6 +80,40 @@ function parameterDetails(item, operator = OPERATORS[item?.operatorId]) {
   return Object.fromEntries(parameterKeys(operator).map((key) => [key, item[key]]));
 }
 
+function unlockedScrollLibrary(state) {
+  return OPERATOR_ORDER
+    .map((operatorId) => OPERATORS[operatorId])
+    .filter((operator) => operator?.kind !== 'tower' && operator.unlockChapter <= state.chapterIndex)
+    .map((operator) => ({
+      id: `unlimited-${operator.id}`,
+      operatorId: operator.id,
+      source: 'unlimited',
+      unlimited: true,
+    }));
+}
+
+function arsenalItems(state) {
+  return [...(state.scrollLibrary ?? []), ...state.operatorQueue];
+}
+
+function findArsenalItem(state, itemId) {
+  return arsenalItems(state).find((item) => item.id === itemId);
+}
+
+function towerQueueLength(state) {
+  return state.operatorQueue.length;
+}
+
+function hasUnlockedTower(state) {
+  return Object.values(OPERATORS).some((operator) => (
+    operator.kind === 'tower' && operator.unlockChapter <= state.chapterIndex
+  ));
+}
+
+const towerOperatorIds = (operatorIds = []) => operatorIds.filter(
+  (operatorId) => OPERATORS[operatorId]?.kind === 'tower',
+);
+
 function drawFormulaCard(state) {
   const index = Math.floor(seededRandom(state) * FORMULA_CARDS.length);
   return { id: nextId(state, 'formula'), cardId: FORMULA_CARDS[index].id, source: 'random' };
@@ -97,11 +135,15 @@ function drawOperatorCard(state) {
     return map;
   }, {});
   let candidates = Object.values(OPERATORS).filter((operator) => (
+    operator.kind === 'tower'
+    &&
     operator.unlockChapter <= state.chapterIndex
     && (counts[operator.id] ?? 0) < ECONOMY.operatorDrawMaxCopies
   ));
   if (candidates.length === 0) {
-    candidates = Object.values(OPERATORS).filter((operator) => operator.unlockChapter <= state.chapterIndex);
+    candidates = Object.values(OPERATORS).filter((operator) => (
+      operator.kind === 'tower' && operator.unlockChapter <= state.chapterIndex
+    ));
   }
   const requiredTags = state.currentWave?.requiredTags ?? [];
   const totalWeight = candidates.reduce(
@@ -327,14 +369,29 @@ function transformEnemy(state, enemy, nextExpression, source, previousText) {
 }
 
 function evaluateOperatorOutcome(operatorId, targetExpression, details = {}) {
-  if (operatorId === 'derivative' || operatorId === 'partial') {
+  if (operatorId === 'add') {
+    return { kind: 'transform', expression: addConstant(targetExpression, details.parameter) };
+  }
+  if (operatorId === 'derivative') {
     return { kind: 'transform', expression: differentiate(targetExpression, 'x', 1) };
+  }
+  if (operatorId === 'partial') {
+    return { kind: 'transform', expression: differentiate(targetExpression, 'z', 1) };
   }
   if (operatorId === 'secondDerivative') {
     return { kind: 'transform', expression: differentiate(targetExpression, 'x', 2) };
   }
   if (operatorId === 'subtract') {
     return { kind: 'transform', expression: subtractConstant(targetExpression, details.parameter) };
+  }
+  if (operatorId === 'multiply') {
+    return { kind: 'transform', expression: multiplyExpression(targetExpression, details.parameter) };
+  }
+  if (operatorId === 'divide') {
+    return { kind: 'transform', expression: divideExpression(targetExpression, details.parameter) };
+  }
+  if (operatorId === 'squareRoot') {
+    return { kind: 'transform', expression: squareRootExpression(targetExpression) };
   }
   if (operatorId === 'definiteIntegralTower') {
     return {
@@ -860,7 +917,7 @@ function updateQueues(state, dt) {
     }
   }
 
-  if (state.operatorQueue.length < OPERATOR_QUEUE_CAPACITY) {
+  if (hasUnlockedTower(state) && towerQueueLength(state) < OPERATOR_QUEUE_CAPACITY) {
     state.operatorCooldown = Math.max(0, state.operatorCooldown - dt);
     if (state.operatorCooldown <= 0) {
       state.operatorQueue.push(drawOperatorCard(state));
@@ -1010,7 +1067,14 @@ function resetWaveRuntime(state, wave) {
 
 function configureWave(state, config, supply, wave, presetTowers = [], source = 'tutorial') {
   state.energy = config.startingEnergy;
-  state.operatorQueue = queueItems(state, 'operator', supply.starterOperators, 'operatorId', source);
+  state.operatorQueue = queueItems(
+    state,
+    'operator',
+    towerOperatorIds(supply.starterOperators),
+    'operatorId',
+    source,
+  );
+  state.scrollLibrary = unlockedScrollLibrary(state);
   state.formulaQueue = queueItems(state, 'formula', supply.starterFormulaIds, 'cardId', source);
   state.constantQueue = queueItems(state, 'constant', supply.starterConstants, 'value', source);
   state.operatorCooldown = OPERATOR_QUEUE_INTERVAL;
@@ -1034,7 +1098,7 @@ function grantGuaranteedSupply(state, wave) {
   state.operatorQueue.push(...queueItems(
     state,
     'operator',
-    supply.operators ?? supply.starterOperators ?? [],
+    towerOperatorIds(supply.operators ?? supply.starterOperators ?? []),
     'operatorId',
     'guaranteed',
   ));
@@ -1081,6 +1145,7 @@ function snapshotTutorialState(state) {
     rngState: state.rngState,
     energy: state.energy,
     operatorQueue: state.operatorQueue.map((item) => ({ ...item })),
+    scrollLibrary: state.scrollLibrary.map((item) => ({ ...item })),
     formulaQueue: state.formulaQueue.map((item) => ({ ...item })),
     constantQueue: state.constantQueue.map((item) => ({ ...item })),
     operatorCooldown: state.operatorCooldown,
@@ -1104,6 +1169,7 @@ function restoreTutorialState(state) {
   state.rngState = snapshot.rngState;
   state.energy = snapshot.energy;
   state.operatorQueue = snapshot.operatorQueue.map((item) => ({ ...item }));
+  state.scrollLibrary = snapshot.scrollLibrary.map((item) => ({ ...item }));
   state.formulaQueue = snapshot.formulaQueue.map((item) => ({ ...item }));
   state.constantQueue = snapshot.constantQueue.map((item) => ({ ...item }));
   state.operatorCooldown = snapshot.operatorCooldown;
@@ -1236,6 +1302,7 @@ export function createGame(seed = INITIAL_STATE.defaultSeed, options = {}) {
     constantQueue: [],
     constantCooldown: CONSTANT_QUEUE_INTERVAL,
     operatorQueue: [],
+    scrollLibrary: [],
     operatorCooldown: OPERATOR_QUEUE_INTERVAL,
     receivedSupplyGrantIds: [],
     selectedFormulaId: null,
@@ -1390,7 +1457,7 @@ function notify(state, text, tone = 'neutral') {
 }
 
 export function selectArsenalItem(state, itemId) {
-  const item = state.operatorQueue.find((candidate) => candidate.id === itemId);
+  const item = findArsenalItem(state, itemId);
   const operator = item ? OPERATORS[item.operatorId] : null;
   if (!operator || operator.unlockChapter > state.chapterIndex) {
     notify(state, '這個算子尚未解鎖。', 'danger');
@@ -1404,7 +1471,7 @@ export function selectArsenalItem(state, itemId) {
     return inscribeParameterScroll(state, itemId);
   }
   if (parameterKeys(operator).length > 0 && !parameterScrollReady(item, operator)) {
-    notify(state, '先在工坊組出常數，選取後點這張捲軸刻寫。', 'neutral');
+    notify(state, '把工坊圓盤拖到這張捲軸；複合值請先組合存入常數庫。', 'neutral');
     return false;
   }
   if (state.energy < operator.cost) {
@@ -1446,7 +1513,7 @@ export function selectArsenalItem(state, itemId) {
 }
 
 export function selectOperator(state, operatorId) {
-  const item = state.operatorQueue.find((candidate) => candidate.operatorId === operatorId);
+  const item = arsenalItems(state).find((candidate) => candidate.operatorId === operatorId);
   if (!item) {
     notify(state, '軍械 queue 裡沒有這張牌。', 'danger');
     return false;
@@ -1456,6 +1523,12 @@ export function selectOperator(state, operatorId) {
 
 function consumeOperatorItem(state, itemId = state.selectedOperatorItemId) {
   if (!itemId) return false;
+  const item = findArsenalItem(state, itemId);
+  const operator = item ? OPERATORS[item.operatorId] : null;
+  if (operator?.kind !== 'tower') {
+    for (const key of parameterKeys(operator)) delete item[key];
+    return true;
+  }
   const before = state.operatorQueue.length;
   state.operatorQueue = state.operatorQueue.filter((item) => item.id !== itemId);
   return state.operatorQueue.length < before;
@@ -1468,10 +1541,10 @@ export function cancelSelection(state) {
   state.partialConfirmOpen = false;
 }
 
-export function placeTower(state, row, column) {
-  const operator = OPERATORS[state.selectedOperator];
-  const operatorItem = state.operatorQueue.find((item) => item.id === state.selectedOperatorItemId);
-  if (!operator || operator.kind !== 'tower' || operatorItem?.operatorId !== operator.id) return false;
+export function deployTowerFromArsenal(state, itemId, row, column) {
+  const operatorItem = state.operatorQueue.find((item) => item.id === itemId);
+  const operator = operatorItem ? OPERATORS[operatorItem.operatorId] : null;
+  if (!operator || operator.kind !== 'tower' || operator.unlockChapter > state.chapterIndex) return false;
   if (row < 0 || row >= state.board.rows || column < 0 || column >= state.board.placeableColumns) return false;
   if (state.towers.some((tower) => tower.row === row && tower.column === column)) {
     notify(state, '這個位置已經有裝置了。', 'danger');
@@ -1480,7 +1553,7 @@ export function placeTower(state, row, column) {
   if (state.energy < operator.cost) return false;
 
   state.energy -= operator.cost;
-  consumeOperatorItem(state);
+  consumeOperatorItem(state, itemId);
   const hp = towerHp(operator.id);
   state.towers.push({
     id: nextId(state, 'tower'),
@@ -1494,10 +1567,15 @@ export function placeTower(state, row, column) {
     fireFlash: 0,
     active: true,
   });
-  state.selectedOperator = null;
-  state.selectedOperatorItemId = null;
+  cancelSelection(state);
   addLog(state, `放置 ${operator.symbol} ${operator.name}`, 'success');
   return true;
+}
+
+export function placeTower(state, row, column) {
+  const operatorItem = state.operatorQueue.find((item) => item.id === state.selectedOperatorItemId);
+  if (operatorItem?.operatorId !== state.selectedOperator) return false;
+  return deployTowerFromArsenal(state, operatorItem.id, row, column);
 }
 
 export function recycleTower(state, towerId) {
@@ -1526,10 +1604,10 @@ export function selectEnemy(state, enemyId) {
   state.selectedEnemyId = enemy?.id ?? null;
 }
 
-export function applyTargetOperator(state, enemyId) {
-  const operatorId = state.targetingOperator;
+export function castTargetOperatorFromArsenal(state, itemId, enemyId) {
+  const operatorItem = findArsenalItem(state, itemId);
+  const operatorId = operatorItem?.operatorId;
   const operator = OPERATORS[operatorId];
-  const operatorItem = state.operatorQueue.find((item) => item.id === state.selectedOperatorItemId);
   const enemy = state.enemies.find((candidate) => (
     candidate.id === enemyId
     && !candidate.dead
@@ -1538,7 +1616,7 @@ export function applyTargetOperator(state, enemyId) {
   if (
     !operator
     || operator.kind !== 'target'
-    || operatorItem?.operatorId !== operatorId
+    || operator.unlockChapter > state.chapterIndex
     || (parameterKeys(operator).length > 0 && !parameterScrollReady(operatorItem, operator))
     || !enemy
     || state.energy < operator.cost
@@ -1566,17 +1644,22 @@ export function applyTargetOperator(state, enemyId) {
   }
 
   state.energy -= operator.cost;
-  consumeOperatorItem(state);
-  state.targetingOperator = null;
-  state.selectedOperatorItemId = null;
+  consumeOperatorItem(state, itemId);
+  cancelSelection(state);
   addOperatorProjectile(state, operatorId, enemy, null, details);
   notify(state, `${operator.name}已發射；命中後結算。`, 'success');
   return true;
 }
 
+export function applyTargetOperator(state, enemyId) {
+  const operatorItem = findArsenalItem(state, state.selectedOperatorItemId);
+  if (operatorItem?.operatorId !== state.targetingOperator) return false;
+  return castTargetOperatorFromArsenal(state, operatorItem.id, enemyId);
+}
+
 export function confirmPartial(state) {
   const operator = OPERATORS.partial;
-  const operatorItem = state.operatorQueue.find((item) => item.id === state.selectedOperatorItemId);
+  const operatorItem = findArsenalItem(state, state.selectedOperatorItemId);
   if (
     state.phase !== 'running'
     || !state.partialConfirmOpen
@@ -1615,7 +1698,7 @@ export function partialPreview(state) {
   )).map((enemy) => {
     const shielded = hasActiveShield(enemy);
     const beforeExpression = activeEnemyExpression(enemy);
-    const after = differentiate(beforeExpression, 'x', 1);
+    const after = differentiate(beforeExpression, 'z', 1);
     const reachesZero = isZero(after);
     return {
       id: enemy.id,
@@ -1748,13 +1831,41 @@ export function discardStoredConstant(state, itemId) {
   return true;
 }
 
+export function storeNumericConstant(state, rawValue, source = '數字鍵盤') {
+  if (state.storedConstants.length >= STORED_CONSTANT_CAPACITY) {
+    notify(state, `常數庫已滿（${STORED_CONSTANT_CAPACITY}/${STORED_CONSTANT_CAPACITY}）。`, 'danger');
+    return false;
+  }
+  const value = Number(rawValue);
+  if (!Number.isFinite(value) || Math.abs(value) > 1_000_000) {
+    notify(state, '請輸入有限且絕對值不超過 1,000,000 的常數。', 'danger');
+    return false;
+  }
+  const normalizedValue = Object.is(value, -0) ? 0 : value;
+  const stored = {
+    id: nextId(state, 'stored-constant'),
+    value: normalizedValue,
+    source,
+  };
+  state.storedConstants.push(stored);
+  state.selectedStoredConstantId = stored.id;
+  cancelSelection(state);
+  addLog(state, `${source} → ${normalizedValue}`, 'success');
+  notify(state, `常數 ${normalizedValue} 已存入常數庫。`, 'success');
+  return true;
+}
+
 export function discardArsenalItem(state, itemId) {
-  const item = state.operatorQueue.find((candidate) => candidate.id === itemId);
+  const item = findArsenalItem(state, itemId);
   if (!item) {
     notify(state, '軍械 queue 是空的。', 'danger');
     return false;
   }
   const operator = OPERATORS[item.operatorId];
+  if (operator.kind !== 'tower') {
+    notify(state, '捲軸是無限供應，不需要丟棄。', 'neutral');
+    return false;
+  }
   state.operatorQueue = state.operatorQueue.filter((candidate) => candidate.id !== itemId);
   if (state.selectedOperatorItemId === itemId) cancelSelection(state);
   addLog(state, `捨棄軍械 ${operator.name}`, 'danger');
@@ -1792,10 +1903,27 @@ export function prepareAssembly(state) {
   return true;
 }
 
-export function inscribeParameterScroll(state, itemId) {
-  const stored = state.storedConstants.find((item) => item.id === state.selectedStoredConstantId);
+export function inscribeParameterScroll(
+  state,
+  itemId,
+  storedConstantId = state.selectedStoredConstantId,
+) {
+  const stored = state.storedConstants.find((item) => item.id === storedConstantId);
   if (!stored) return false;
-  const item = state.operatorQueue.find((candidate) => candidate.id === itemId);
+  const changed = inscribeParameterValue(state, itemId, stored.value, stored.source ?? '常數庫');
+  if (!changed) return false;
+  state.storedConstants = state.storedConstants.filter((candidate) => candidate.id !== stored.id);
+  if (state.selectedStoredConstantId === stored.id) state.selectedStoredConstantId = null;
+  return true;
+}
+
+export function inscribeParameterValue(state, itemId, rawValue, source = '數字圓盤') {
+  const value = Number(rawValue);
+  if (!Number.isFinite(value) || Math.abs(value) > 1_000_000) {
+    notify(state, '請使用有限且絕對值不超過 1,000,000 的常數。', 'danger');
+    return false;
+  }
+  const item = findArsenalItem(state, itemId);
   const operator = item ? OPERATORS[item.operatorId] : null;
   const keys = parameterKeys(operator);
   if (!item || keys.length === 0) {
@@ -1808,14 +1936,13 @@ export function inscribeParameterScroll(state, itemId) {
   }
 
   const key = keys.find((candidate) => item[candidate] === null || item[candidate] === undefined);
-  item[key] = stored.value;
-  state.storedConstants = state.storedConstants.filter((candidate) => candidate.id !== stored.id);
-  state.selectedStoredConstantId = null;
+  const normalizedValue = Object.is(value, -0) ? 0 : value;
+  item[key] = normalizedValue;
   cancelSelection(state);
 
   const ready = parameterScrollReady(item, operator);
   const slotLabel = key === 'lowerBound' ? '下界' : key === 'upperBound' ? '上界' : '參數';
-  addLog(state, `${operator.name}${slotLabel}刻寫 ${stored.value}`, ready ? 'success' : 'neutral');
+  addLog(state, `${operator.name}${slotLabel}刻寫 ${normalizedValue}（${source}）`, ready ? 'success' : 'neutral');
   notify(
     state,
     ready ? `${operator.name}刻寫完成；再點一次即可選擇目標。` : '下界已刻寫；請再選一個常數刻寫上界。',
@@ -1824,8 +1951,8 @@ export function inscribeParameterScroll(state, itemId) {
   return true;
 }
 
-export function installAssembly(state, destinationId) {
-  return inscribeParameterScroll(state, destinationId);
+export function installAssembly(state, destinationId, storedConstantId) {
+  return inscribeParameterScroll(state, destinationId, storedConstantId);
 }
 
 export function selectStoredConstant(state, itemId) {

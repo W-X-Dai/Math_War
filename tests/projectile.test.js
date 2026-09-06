@@ -11,8 +11,12 @@ import {
 
 test('every operator declares projectile shape and trajectory metadata', () => {
   const expected = {
+    add: { shape: 'add', trajectory: 'drop' },
     derivative: { shape: 'derivative', trajectory: 'lane' },
     subtract: { shape: 'subtract', trajectory: 'drop' },
+    multiply: { shape: 'multiply', trajectory: 'drop' },
+    divide: { shape: 'divide', trajectory: 'drop' },
+    squareRoot: { shape: 'square-root', trajectory: 'drop' },
     secondDerivative: { shape: 'second-derivative', trajectory: 'lane' },
     definiteIntegralTower: { shape: 'definite-integral', trajectory: 'drop' },
     integral: { shape: 'indefinite-integral', trajectory: 'drop' },
@@ -32,18 +36,30 @@ test('every operator declares projectile shape and trajectory metadata', () => {
 
 test('projectile labels preserve each attack notation and its configured values', async (t) => {
   const cases = [
+    ['add positive', { operatorId: 'add', parameter: 3 }, '+3'],
+    ['add negative', { operatorId: 'add', parameter: -3 }, '−3'],
+    ['add pi', { operatorId: 'add', parameter: Math.PI }, '+π'],
+    ['add e', { operatorId: 'add', parameter: Math.E }, '+e'],
+    ['add zero', { operatorId: 'add', parameter: 0 }, '+0'],
     ['first derivative', { operatorId: 'derivative' }, 'd/dx'],
     ['second derivative', { operatorId: 'secondDerivative' }, 'd²/dx²'],
     ['subtract positive', { operatorId: 'subtract', parameter: 3 }, '−3'],
     ['subtract negative', { operatorId: 'subtract', parameter: -3 }, '+3'],
     ['subtract negative pi', { operatorId: 'subtract', parameter: -Math.PI }, '+π'],
+    ['subtract negative e', { operatorId: 'subtract', parameter: -Math.E }, '+e'],
     ['subtract zero', { operatorId: 'subtract', parameter: 0 }, '−0'],
+    ['multiply positive', { operatorId: 'multiply', parameter: 3 }, '×3'],
+    ['multiply negative', { operatorId: 'multiply', parameter: -3 }, '×−3'],
+    ['divide positive', { operatorId: 'divide', parameter: 3 }, '÷3'],
+    ['divide pi', { operatorId: 'divide', parameter: Math.PI }, '÷π'],
+    ['square root', { operatorId: 'squareRoot' }, '√'],
     [
       'definite integral with pi bounds',
       { operatorId: 'definiteIntegralTower', lowerBound: -Math.PI, upperBound: Math.PI },
       '∫[−π,π]dx',
     ],
     ['evaluation at pi', { operatorId: 'evaluateTower', parameter: Math.PI }, 'f(π)'],
+    ['evaluation at e', { operatorId: 'evaluateTower', parameter: Math.E }, 'f(e)'],
     ['Euler positive parameter', { operatorId: 'eulerTower', parameter: 2 }, 'x·d/dx+2I'],
     ['Euler negative parameter', { operatorId: 'eulerTower', parameter: -2 }, 'x·d/dx−2I'],
     ['Euler zero parameter', { operatorId: 'eulerTower', parameter: 0 }, 'x·d/dx'],
@@ -65,7 +81,7 @@ test('projectile labels preserve each attack notation and its configured values'
     ['indefinite integral', { operatorId: 'integral', parameter: -5 }, '∫dx+C'],
     ['input reflection', { operatorId: 'reflect' }, 'x↦−x'],
     ['limit at infinity', { operatorId: 'limit' }, 'lim x→∞'],
-    ['partial derivative', { operatorId: 'partial' }, '∂/∂x'],
+    ['partial derivative', { operatorId: 'partial' }, '∂/∂z'],
   ];
 
   for (const [name, effect, expected] of cases) {
@@ -117,22 +133,29 @@ test('lane projectile geometry preserves off-board positions while drops stay on
   );
 });
 
-test('flying lane projectiles stay on their physical lane instead of following target offsets', () => {
+test('flying lane projectiles progressively meet the displayed target card', () => {
   const cases = [
-    [0, { chipOffset: 4.4, verticalOffset: -30 }, 0, 0],
-    [0.5, { chipOffset: -4.4, verticalOffset: 30 }, 0, 0],
-    [1, { chipOffset: 2.2, verticalOffset: -60 }, 0, 0],
+    [0.2, 0, 0],
+    [0.5, -2.2, 15],
+    [0.8, -4.4, 30],
   ];
 
-  for (const [progress, layout, offsetX, offsetY] of cases) {
+  for (const [currentPosition, offsetX, offsetY] of cases) {
     const geometry = projectileVisualGeometry(
-      { type: 'projectile', trajectory: 'lane', position: 0.8, from: 0.2, progress },
+      {
+        type: 'projectile',
+        trajectory: 'lane',
+        position: 1.06,
+        from: 0.2,
+        currentPosition,
+        progress: (currentPosition - 0.2) / (1.06 - 0.2),
+      },
       60,
-      layout,
+      { chipOffset: -4.4, verticalOffset: 30, targetPosition: 0.8 },
     );
-    assert.equal(geometry.offsetX, offsetX);
-    assert.equal(geometry.offsetY, offsetY);
-    assert.ok(Math.abs(geometry.x - (0.2 + (0.6 * progress))) < 1e-12);
+    assert.ok(Math.abs(geometry.offsetX - offsetX) < 1e-12);
+    assert.ok(Math.abs(geometry.offsetY - offsetY) < 1e-12);
+    assert.equal(geometry.x, currentPosition);
   }
 });
 
@@ -165,17 +188,26 @@ test('impacted projectiles use full target offset even with stale progress', () 
 test('projectile target layout survives target removal and cache drops finished effects', () => {
   const effect = { id: 'fx-1', type: 'projectile', targetId: 'enemy-1' };
   const liveLayouts = new Map([
-    ['enemy-1', { chipOffset: -4.4, verticalOffset: 30, unrelated: true }],
+    ['enemy-1', {
+      chipOffset: -4.4,
+      verticalOffset: 30,
+      targetPosition: 0.74,
+      unrelated: true,
+    }],
   ]);
 
   const initial = resolveProjectileTargetLayouts([effect], liveLayouts);
-  assert.deepEqual(initial.layouts.get(effect.id), { chipOffset: -4.4, verticalOffset: 30 });
+  assert.deepEqual(initial.layouts.get(effect.id), {
+    chipOffset: -4.4,
+    verticalOffset: 30,
+    targetPosition: 0.74,
+  });
   assert.equal(initial.cache.size, 1);
 
   const afterTargetRemoval = resolveProjectileTargetLayouts([effect], new Map(), initial.cache);
   assert.deepEqual(
     afterTargetRemoval.layouts.get(effect.id),
-    { chipOffset: -4.4, verticalOffset: 30 },
+    { chipOffset: -4.4, verticalOffset: 30, targetPosition: 0.74 },
   );
   assert.equal(afterTargetRemoval.cache.size, 1);
 
@@ -212,6 +244,8 @@ test('projectile rendering has no ray or trail markup and styles', async () => {
   assert.match(stageSource, /:data-trajectory="effect\.trajectory"/);
   assert.match(stageSource, /:data-impact-target-id="effect\.impactTargetId"/);
   assert.match(stageSource, /:data-projectile-position="effect\.currentPosition"/);
+  assert.match(stageSource, /targetPosition: Number\(enemyItem\.position\)/);
+  assert.doesNotMatch(stageSource, /String\(a\.id\)\.localeCompare/);
   assert.match(stageSource, /'is-missed': effect\.status === 'missed'/);
   assert.match(stageSource, /<div class="enemy-layer" data-layer="enemies">/);
   assert.doesNotMatch(stageSource, /<TransitionGroup[^>]+enemy-layer/);

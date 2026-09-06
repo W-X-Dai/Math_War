@@ -14,6 +14,7 @@ import {
   advanceEnemyTutorial,
   advanceWeaponTutorial,
   applyTargetOperator,
+  castTargetOperatorFromArsenal,
   chapterEnemyTutorials,
   chapterWeaponTutorials,
   confirmPartial,
@@ -25,7 +26,9 @@ import {
   discardConstantItem,
   discardFormulaItem,
   discardStoredConstant,
+  deployTowerFromArsenal,
   installAssembly,
+  inscribeParameterValue,
   partialPreview,
   placeTower,
   prepareAssembly,
@@ -36,6 +39,7 @@ import {
   selectStoredConstant,
   startGame,
   startWave,
+  storeNumericConstant,
   tick,
   togglePause,
 } from '../src/game/engine.js';
@@ -46,6 +50,7 @@ import {
   FORMULA_QUEUE_CAPACITY,
   INTEGRATION_CONSTANTS,
   OPERATOR_QUEUE_CAPACITY,
+  OPERATOR_ORDER,
   OPERATORS,
   STORED_CONSTANT_CAPACITY,
 } from '../src/game/content.js';
@@ -73,12 +78,17 @@ function freezeSpawns(state) {
 }
 
 function addArsenalCard(state, operatorId, id = `manual-${operatorId}`) {
-  state.operatorQueue.push({ id, operatorId });
+  const collection = OPERATORS[operatorId].kind === 'tower'
+    ? state.operatorQueue
+    : state.scrollLibrary;
+  collection.push({ id, operatorId, source: OPERATORS[operatorId].kind === 'tower' ? 'manual' : 'unlimited', unlimited: OPERATORS[operatorId].kind !== 'tower' });
+  state.energy = Math.max(state.energy, OPERATORS[operatorId].cost);
   return id;
 }
 
 function addConfiguredScroll(state, operatorId, details, id = `manual-${operatorId}`) {
-  state.operatorQueue.push({ id, operatorId, ...details });
+  state.scrollLibrary.push({ id, operatorId, source: 'unlimited', unlimited: true, ...details });
+  state.energy = Math.max(state.energy, OPERATORS[operatorId].cost);
   return id;
 }
 
@@ -118,6 +128,10 @@ function setLaneProjectilePosition(projectile, position) {
   projectile.ttl = projectile.impactIn + GAMEPLAY_CONFIG.effects.projectileImpactLingerSeconds;
 }
 
+const towerIds = (operatorIds) => operatorIds.filter(
+  (operatorId) => OPERATORS[operatorId]?.kind === 'tower',
+);
+
 function assertProjectile(effect, operatorId, expected = {}) {
   assert.ok(effect, `${operatorId} should emit a projectile`);
   assert.equal(effect.operatorId, operatorId);
@@ -149,13 +163,14 @@ test('the compatible default starts level one with its deterministic tutorial sa
   assert.equal(first.currentWave.kind, 'tutorial');
   assert.deepEqual(first.currentWave, generateTutorialWave(0));
   assert.deepEqual(first.board, { rows: 4, columns: 7, placeableColumns: 4 });
-  assert.equal(first.operatorQueue.length, OPERATOR_QUEUE_CAPACITY);
-  assert.deepEqual(first.operatorQueue.map((item) => item.operatorId), CHAPTER_TUTORIALS[0].starterOperators);
+  assert.equal(first.operatorQueue.length, towerIds(CHAPTER_TUTORIALS[0].starterOperators).length);
+  assert.deepEqual(first.operatorQueue.map((item) => item.operatorId), towerIds(CHAPTER_TUTORIALS[0].starterOperators));
+  assert.deepEqual(first.scrollLibrary.map((item) => item.operatorId), ['add', 'subtract']);
   assert.equal(first.towers.length, CHAPTER_TUTORIALS[0].presetTowers.length);
   assert.ok(first.towers.every((tower) => tower.tutorialPreset));
   assert.deepEqual(
     first.tutorialSnapshot.operatorQueue.map((item) => item.operatorId),
-    CHAPTERS[0].starterOperators,
+    towerIds(CHAPTERS[0].starterOperators),
   );
   assert.deepEqual(
     first.tutorialSnapshot.formulaQueue.map((item) => item.cardId),
@@ -166,7 +181,8 @@ test('the compatible default starts level one with its deterministic tutorial sa
     CHAPTERS[0].starterConstants,
   );
   const presetTowerCount = first.towers.length;
-  assert.equal(discardTower(first, first.towers[0].id), false);
+  assert.equal(presetTowerCount, 0);
+  assert.equal(discardTower(first, 'missing-tutorial-tower'), false);
   assert.equal(first.towers.length, presetTowerCount);
 });
 
@@ -187,8 +203,16 @@ test('all six levels can start independently with their own fresh formal loadout
     assert.deepEqual(state.board, chapter.board);
     assert.deepEqual(
       state.operatorQueue.filter((item) => item.source === 'starter').map((item) => item.operatorId),
-      chapter.starterOperators,
+      towerIds(chapter.starterOperators),
     );
+    assert.deepEqual(
+      state.scrollLibrary.map((item) => item.operatorId),
+      Object.values(OPERATORS)
+        .filter((operator) => operator.kind !== 'tower' && operator.unlockChapter <= levelIndex)
+        .sort((left, right) => OPERATOR_ORDER.indexOf(left.id) - OPERATOR_ORDER.indexOf(right.id))
+        .map((operator) => operator.id),
+    );
+    assert.ok(state.scrollLibrary.every((item) => item.unlimited && item.source === 'unlimited'));
     assert.deepEqual(
       state.formulaQueue.filter((item) => item.source === 'starter').map((item) => item.cardId),
       chapter.starterFormulaIds,
@@ -292,21 +316,24 @@ test('preparation auto-starts without bonus and pause freezes its clock', () => 
 });
 
 test('new enemies and weapons pause preparation until their introductions are read', () => {
-  assert.deepEqual(chapterWeaponTutorials(0), ['derivative', 'subtract']);
-  assert.deepEqual(chapterWeaponTutorials(1), ['secondDerivative', 'integral']);
+  assert.deepEqual(chapterWeaponTutorials(0), ['add', 'subtract']);
+  assert.deepEqual(
+    chapterWeaponTutorials(1),
+    ['derivative', 'secondDerivative', 'multiply', 'divide', 'squareRoot', 'integral'],
+  );
   assert.deepEqual(chapterWeaponTutorials(2), ['limit', 'eulerTower']);
   assert.deepEqual(chapterWeaponTutorials(3), ['partial', 'evaluateTower']);
   assert.deepEqual(chapterWeaponTutorials(4), ['definiteIntegralTower', 'resonanceTower']);
   assert.deepEqual(chapterWeaponTutorials(5), ['reflect']);
   assert.deepEqual(chapterWeaponTutorials(CHAPTERS.length), []);
-  assert.deepEqual(chapterEnemyTutorials(0), ['constant', 'polynomial']);
+  assert.deepEqual(chapterEnemyTutorials(0), ['constant']);
   assert.deepEqual(chapterEnemyTutorials(4), ['trigonometric']);
   assert.deepEqual(chapterEnemyTutorials(CHAPTERS.length), []);
 
   const state = createGame(111);
   startGame(state);
-  assert.deepEqual(state.enemyTutorialQueue, ['constant', 'polynomial']);
-  assert.deepEqual(state.weaponTutorialQueue, ['derivative', 'subtract']);
+  assert.deepEqual(state.enemyTutorialQueue, ['constant']);
+  assert.deepEqual(state.weaponTutorialQueue, ['add', 'subtract']);
 
   const prepBefore = state.prepRemaining;
   const formulaCooldownBefore = state.formulaCooldown;
@@ -315,8 +342,6 @@ test('new enemies and weapons pause preparation until their introductions are re
   assert.equal(state.formulaCooldown, formulaCooldownBefore);
   assert.equal(startWave(state), false);
 
-  assert.equal(advanceEnemyTutorial(state), true);
-  assert.deepEqual(state.enemyTutorialQueue, ['polynomial']);
   assert.equal(advanceEnemyTutorial(state), true);
   assert.deepEqual(state.enemyTutorialQueue, []);
   assert.equal(advanceWeaponTutorial(state), true);
@@ -350,15 +375,15 @@ test('clearing a tutorial wave restores sandbox state and opens the seeded chall
   assert.equal(state.towers.length, 0);
   assert.deepEqual(
     state.operatorQueue.map((item) => item.operatorId),
-    [...CHAPTERS[0].starterOperators, ...state.currentWave.guaranteedSupply.operators],
+    towerIds([...CHAPTERS[0].starterOperators, ...state.currentWave.guaranteedSupply.operators]),
   );
   assert.deepEqual(
     state.operatorQueue.filter((item) => item.source === 'starter').map((item) => item.operatorId),
-    CHAPTERS[0].starterOperators,
+    towerIds(CHAPTERS[0].starterOperators),
   );
   assert.deepEqual(
     state.operatorQueue.filter((item) => item.source === 'guaranteed').map((item) => item.operatorId),
-    state.currentWave.guaranteedSupply.operators,
+    towerIds(state.currentWave.guaranteedSupply.operators),
   );
   assert.deepEqual(state.currentWave, generateFiniteWave(112, 0));
 });
@@ -379,7 +404,7 @@ test('losing a tutorial wave restarts its sandbox instead of ending the run', ()
 });
 
 test('placing a tower consumes one matching card and its energy cost', () => {
-  const state = createGame(12);
+  const state = createGame(12, { levelIndex: 1, skipTutorial: true });
   startGame(state);
   const item = state.operatorQueue.find((card) => card.operatorId === 'derivative');
   const countBefore = state.operatorQueue.filter((card) => card.operatorId === 'derivative').length;
@@ -388,6 +413,23 @@ test('placing a tower consumes one matching card and its energy cost', () => {
   assert.equal(placeTower(state, 0, 0), true);
   assert.equal(state.energy, energyBefore - OPERATORS.derivative.cost);
   assert.equal(state.operatorQueue.filter((card) => card.operatorId === 'derivative').length, countBefore - 1);
+  assert.equal(state.selectedOperatorItemId, null);
+});
+
+test('drag-style tower deployment uses the dragged card without relying on selection', () => {
+  const state = createGame(121, { levelIndex: 1, skipTutorial: true });
+  startGame(state);
+  const dragged = state.operatorQueue.find((card) => card.operatorId === 'derivative');
+  const selected = state.operatorQueue.find((card) => card.id !== dragged.id);
+  const energyBefore = state.energy;
+  state.selectedOperatorItemId = selected.id;
+  state.selectedOperator = selected.operatorId;
+
+  assert.equal(deployTowerFromArsenal(state, dragged.id, 0, 0), true);
+  assert.equal(state.energy, energyBefore - OPERATORS.derivative.cost);
+  assert.equal(state.operatorQueue.some((card) => card.id === dragged.id), false);
+  assert.equal(state.operatorQueue.some((card) => card.id === selected.id), true);
+  assert.equal(state.towers[0].typeId, 'derivative');
   assert.equal(state.selectedOperatorItemId, null);
 });
 
@@ -405,7 +447,7 @@ test('recycling a player tower returns half its original cost regardless of dama
 });
 
 test('failed arsenal selection keeps both card and energy', () => {
-  const state = createGame(13);
+  const state = createGame(13, { levelIndex: 1, skipTutorial: true });
   startGame(state);
   const item = state.operatorQueue.find((card) => card.operatorId === 'derivative');
   state.energy = 0;
@@ -440,10 +482,10 @@ test('a shielded enemy uses its body damage at the base and leaves without a kil
 });
 
 test('non-leading formula and constant cards assemble and inscribe a scroll', () => {
-  const state = createGame(14);
+  const state = createGame(14, { levelIndex: 1, skipTutorial: true });
   const formula = state.formulaQueue.find((item) => item.cardId === 'doubleK');
   const constant = state.constantQueue.find((item) => item.value === 2);
-  const subtractCard = state.operatorQueue.find((item) => item.operatorId === 'subtract');
+  const subtractCard = state.scrollLibrary.find((item) => item.operatorId === 'subtract');
   assert.equal(selectFormulaItem(state, formula.id), true);
   assert.equal(selectConstantItem(state, constant.id), true);
   assert.equal(currentAssembly(state).value, 4);
@@ -453,7 +495,7 @@ test('non-leading formula and constant cards assemble and inscribe a scroll', ()
   assert.equal(selectArsenalItem(state, subtractCard.id), true);
   assert.equal(subtractCard.parameter, 4);
   assert.equal(state.towers.some((tower) => tower.typeId === 'subtract'), false);
-  assert.equal(state.operatorQueue.some((item) => item.id === subtractCard.id), true);
+  assert.equal(state.scrollLibrary.some((item) => item.id === subtractCard.id), true);
   assert.equal(state.storedConstants.length, 0);
   assert.equal(state.formulaQueue.some((item) => item.id === formula.id), false);
   assert.equal(state.constantQueue.some((item) => item.id === constant.id), false);
@@ -468,7 +510,7 @@ test('a blank parameter scroll cannot target until it has been inscribed', () =>
 
   assert.equal(selectArsenalItem(state, cardId), false);
   assert.equal(state.targetingOperator, null);
-  assert.equal(state.operatorQueue.some((item) => item.id === cardId), true);
+  assert.equal(state.scrollLibrary.some((item) => item.id === cardId), true);
   assert.equal(state.energy, energyBefore);
 });
 
@@ -482,7 +524,7 @@ test('a definite-integral scroll records both bounds before entering targeting m
   ];
   state.selectedStoredConstantId = 'lower';
   const cardId = addArsenalCard(state, 'definiteIntegralTower');
-  const card = state.operatorQueue[0];
+  const card = state.scrollLibrary.find((item) => item.id === cardId);
 
   assert.equal(selectArsenalItem(state, cardId), true);
   assert.equal(card.lowerBound, 0);
@@ -528,6 +570,17 @@ test('assembled constants store up to five without consuming materials on overfl
   assert.equal(state.constantQueue.length, constantsBefore);
 });
 
+test('numeric keypad constants support signed values and pi up to library capacity', () => {
+  const state = createGame(1411);
+  state.storedConstants = [];
+  assert.equal(storeNumericConstant(state, -12.5), true);
+  assert.equal(storeNumericConstant(state, Math.PI, '數字鍵盤 π'), true);
+  assert.deepEqual(state.storedConstants.map((item) => item.value), [-12.5, Math.PI]);
+  assert.equal(state.selectedStoredConstantId, state.storedConstants[1].id);
+  assert.equal(storeNumericConstant(state, Number.POSITIVE_INFINITY), false);
+  assert.equal(state.storedConstants.length, 2);
+});
+
 test('any stored constant can be selected, discarded, or inscribed on a parameter scroll', () => {
   const state = createGame(142);
   state.storedConstants = [
@@ -538,7 +591,8 @@ test('any stored constant can be selected, discarded, or inscribed on a paramete
   state.selectedStoredConstantId = 'stored-a';
   const ordinaryCard = { id: 'ordinary-card', operatorId: 'derivative' };
   const parameterScroll = { id: 'parameter-scroll', operatorId: 'eulerTower' };
-  state.operatorQueue.push(ordinaryCard, parameterScroll);
+  state.operatorQueue.push(ordinaryCard);
+  state.scrollLibrary.push(parameterScroll);
 
   assert.equal(selectStoredConstant(state, 'stored-b'), true);
   assert.equal(installAssembly(state, ordinaryCard.id), false);
@@ -554,11 +608,97 @@ test('any stored constant can be selected, discarded, or inscribed on a paramete
   assert.equal(state.selectedStoredConstantId, null);
 });
 
-test('all three queues refill during preparation and respect capacity', () => {
-  const state = createGame(15);
+test('drag-style inscription uses the dropped constant instead of the selected constant', () => {
+  const state = createGame(1421);
+  state.storedConstants = [
+    { id: 'selected-constant', value: 2, source: 'selected' },
+    { id: 'dragged-constant', value: 7, source: 'dragged' },
+  ];
+  state.selectedStoredConstantId = 'selected-constant';
+  const cardId = addArsenalCard(state, 'eulerTower');
+  const parameterScroll = state.scrollLibrary.find((item) => item.id === cardId);
+
+  assert.equal(installAssembly(state, cardId, 'dragged-constant'), true);
+  assert.equal(parameterScroll.parameter, 7);
+  assert.deepEqual(state.storedConstants.map((item) => item.id), ['selected-constant']);
+  assert.equal(state.selectedStoredConstantId, 'selected-constant');
+});
+
+test('numeric discs inscribe direct constants without using stored inventory', () => {
+  const state = createGame(1422);
+  state.storedConstants = [{ id: 'kept-constant', value: -4, source: 'stored' }];
+  state.selectedStoredConstantId = 'kept-constant';
+  const cardId = addArsenalCard(state, 'definiteIntegralTower');
+  const parameterScroll = state.scrollLibrary.find((item) => item.id === cardId);
+
+  assert.equal(inscribeParameterValue(state, cardId, 0, '圓盤 0'), true);
+  assert.equal(parameterScroll.lowerBound, 0);
+  assert.equal(inscribeParameterValue(state, cardId, Math.E, '圓盤 e'), true);
+  assert.equal(parameterScroll.upperBound, Math.E);
+  assert.deepEqual(state.storedConstants, [{ id: 'kept-constant', value: -4, source: 'stored' }]);
+  assert.equal(state.selectedStoredConstantId, 'kept-constant');
+  assert.equal(inscribeParameterValue(state, cardId, Math.PI), false);
+  assert.equal(inscribeParameterValue(state, cardId, Number.POSITIVE_INFINITY), false);
+});
+
+test('drag-style target casting rejects blank scrolls without consuming selected constants', () => {
+  const state = createGame(1422);
+  state.chapterIndex = 5;
+  freezeSpawns(state);
+  state.operatorQueue = [];
+  state.storedConstants = [{ id: 'selected-constant', value: 9, source: 'selected' }];
+  state.selectedStoredConstantId = 'selected-constant';
+  const target = testEnemy(polynomial([term(1, 1)]), { speed: 0 });
+  state.enemies.push(target);
+  const blankCardId = addArsenalCard(state, 'eulerTower');
+  const energyBefore = state.energy;
+
+  assert.equal(castTargetOperatorFromArsenal(state, blankCardId, target.id), false);
+  assert.deepEqual(state.storedConstants.map((item) => item.id), ['selected-constant']);
+  assert.equal(state.scrollLibrary.find((item) => item.id === blankCardId).parameter, undefined);
+  assert.equal(state.energy, energyBefore);
+});
+
+test('drag-style inscription fills both definite-integral bounds in order', () => {
+  const state = createGame(1424);
+  state.chapterIndex = 5;
+  state.operatorQueue = [];
+  state.storedConstants = [
+    { id: 'lower-bound', value: 0, source: 'lower' },
+    { id: 'upper-bound', value: Math.PI, source: 'upper' },
+  ];
+  const cardId = addArsenalCard(state, 'definiteIntegralTower');
+  const card = state.scrollLibrary.find((item) => item.id === cardId);
+
+  assert.equal(installAssembly(state, cardId, 'lower-bound'), true);
+  assert.equal(card.lowerBound, 0);
+  assert.equal(card.upperBound, undefined);
+  assert.equal(installAssembly(state, cardId, 'upper-bound'), true);
+  assert.equal(card.upperBound, Math.PI);
+  assert.equal(state.storedConstants.length, 0);
+});
+
+test('drag-style target casting fires a configured scroll directly at the dropped enemy', () => {
+  const state = createGame(1423);
+  state.chapterIndex = 5;
+  freezeSpawns(state);
+  state.operatorQueue = [];
+  const target = testEnemy(polynomial([term(4, -2)]), { speed: 0 });
+  state.enemies.push(target);
+  const cardId = addConfiguredScroll(state, 'eulerTower', { parameter: 2 });
+  const energyBefore = state.energy;
+
+  assert.equal(castTargetOperatorFromArsenal(state, cardId, target.id), true);
+  assert.equal(state.energy, energyBefore - OPERATORS.eulerTower.cost);
+  assert.equal(projectileEffects(state)[0].targetId, target.id);
+  assert.equal(projectileEffects(state)[0].parameter, 2);
+  assert.equal(state.scrollLibrary.find((item) => item.id === cardId).parameter, undefined);
+});
+
+test('tower and compatibility material queues refill during preparation and respect capacity', () => {
+  const state = createGame(15, { levelIndex: 1, skipTutorial: true });
   startGame(state);
-  dismissIntroductions(state);
-  state.operatorQueue.pop();
+  state.operatorQueue = state.operatorQueue.slice(0, OPERATOR_QUEUE_CAPACITY - 1);
   state.formulaQueue.pop();
   state.constantQueue.pop();
   state.operatorCooldown = 0.01;
@@ -572,13 +712,37 @@ test('all three queues refill during preparation and respect capacity', () => {
   assert.ok(state.constantQueue.length <= CONSTANT_QUEUE_CAPACITY);
 });
 
-test('any arsenal, formula, or constant item can be discarded', () => {
-  const state = createGame(16);
-  const [arsenal, formula, constant] = [state.operatorQueue[4], state.formulaQueue[2], state.constantQueue[3]];
+test('chapter one safely skips tower refill when no tower has been unlocked', () => {
+  const state = createGame(151, { levelIndex: 0, skipTutorial: true });
+  startGame(state);
+  state.operatorQueue = [];
+  state.formulaQueue = Array.from(
+    { length: FORMULA_QUEUE_CAPACITY },
+    (_, index) => ({ id: `full-formula-${index}`, cardId: 'identityK' }),
+  );
+  state.constantQueue = Array.from(
+    { length: CONSTANT_QUEUE_CAPACITY },
+    (_, index) => ({ id: `full-constant-${index}`, value: index + 1 }),
+  );
+  state.operatorCooldown = 0;
+  const rngBefore = state.rngState;
+
+  assert.doesNotThrow(() => tick(state, 0.01));
+  assert.deepEqual(state.operatorQueue, []);
+  assert.equal(state.rngState, rngBefore);
+  assert.equal(state.effects.some((effect) => effect.type === 'queue' && effect.label === '+ 軍械'), false);
+});
+
+test('tower, formula, and constant items can be discarded while unlimited scrolls cannot', () => {
+  const state = createGame(16, { levelIndex: 1, skipTutorial: true });
+  const [arsenal, formula, constant] = [state.operatorQueue[0], state.formulaQueue[2], state.constantQueue[3]];
+  const scroll = state.scrollLibrary[0];
   assert.equal(discardArsenalItem(state, arsenal.id), true);
+  assert.equal(discardArsenalItem(state, scroll.id), false);
   assert.equal(discardFormulaItem(state, formula.id), true);
   assert.equal(discardConstantItem(state, constant.id), true);
   assert.equal(state.operatorQueue.some((item) => item.id === arsenal.id), false);
+  assert.equal(state.scrollLibrary.some((item) => item.id === scroll.id), true);
   assert.equal(state.formulaQueue.some((item) => item.id === formula.id), false);
   assert.equal(state.constantQueue.some((item) => item.id === constant.id), false);
 });
@@ -594,7 +758,7 @@ test('pressure resources continue into mixed and clearing mixed wins the selecte
   });
   state.towers.push(persistentTower);
   state.operatorQueue.push({ id: 'persistent-card', operatorId: 'derivative', source: 'random' });
-  state.operatorQueue.push({
+  state.scrollLibrary.push({
     id: 'persistent-scroll', operatorId: 'eulerTower', parameter: 2, source: 'random',
   });
   state.baseHp = 350;
@@ -613,7 +777,7 @@ test('pressure resources continue into mixed and clearing mixed wins the selecte
   assert.deepEqual(state.storedConstants, [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }]);
   assert.equal(state.selectedStoredConstantId, 'persistent-constant');
   assert.ok(state.operatorQueue.some((item) => item.id === 'persistent-card'));
-  assert.equal(state.operatorQueue.find((item) => item.id === 'persistent-scroll').parameter, 2);
+  assert.equal(state.scrollLibrary.find((item) => item.id === 'persistent-scroll').parameter, 2);
   const continuedTower = state.towers.find((tower) => tower.id === persistentTower.id);
   assert.equal(continuedTower.hp, 77);
 
@@ -628,7 +792,7 @@ test('pressure resources continue into mixed and clearing mixed wins the selecte
   assert.equal(state.baseHp, 350);
   assert.equal(state.energy, 1);
   assert.ok(state.operatorQueue.some((item) => item.id === 'persistent-card'));
-  assert.equal(state.operatorQueue.find((item) => item.id === 'persistent-scroll').parameter, 2);
+  assert.equal(state.scrollLibrary.find((item) => item.id === 'persistent-scroll').parameter, 2);
   assert.equal(state.towers.find((tower) => tower.id === persistentTower.id).hp, 77);
 });
 
@@ -643,7 +807,7 @@ test('endless starts from its fixed loadout and preserves resources between roun
   assert.deepEqual(state.board, ENDLESS_CHAPTER.board);
   assert.deepEqual(
     state.operatorQueue.filter((item) => item.source === 'starter').map((item) => item.operatorId),
-    ENDLESS_CHAPTER.starterOperators,
+    towerIds(ENDLESS_CHAPTER.starterOperators),
   );
   assert.deepEqual(
     state.formulaQueue.filter((item) => item.source === 'starter').map((item) => item.cardId),
@@ -717,7 +881,7 @@ test('configured parameter scrolls apply their mathematical operators without oc
   }
 });
 
-test('f(k) substitutes x without silently setting y to zero', () => {
+test('f(k) substitutes x without silently setting z to zero', () => {
   const state = createGame(24);
   state.chapterIndex = 5;
   freezeSpawns(state);
@@ -730,7 +894,7 @@ test('f(k) substitutes x without silently setting y to zero', () => {
   assert.equal(selectArsenalItem(state, cardId), true);
   assert.equal(applyTargetOperator(state, target.id), true);
   advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop);
-  assert.equal(formatExpression(target.expression), 'y^2');
+  assert.equal(formatExpression(target.expression), 'z^2');
 });
 
 test('every tower attack emits its own semantic projectile metadata', async (t) => {
@@ -810,9 +974,28 @@ test('an idle ready tower does not bank cooldown and burst-fire at the next targ
 test('every single-target operator emits a falling semantic projectile', async (t) => {
   const cases = [
     {
+      operatorId: 'add',
+      expression: polynomial(-3),
+      details: { parameter: 3 },
+    },
+    {
       operatorId: 'subtract',
       expression: polynomial(3),
       details: { parameter: 3 },
+    },
+    {
+      operatorId: 'multiply',
+      expression: polynomial(3),
+      details: { parameter: 2 },
+    },
+    {
+      operatorId: 'divide',
+      expression: polynomial(6),
+      details: { parameter: 2 },
+    },
+    {
+      operatorId: 'squareRoot',
+      expression: polynomial(9),
     },
     {
       operatorId: 'definiteIntegralTower',
@@ -885,6 +1068,97 @@ test('every single-target operator emits a falling semantic projectile', async (
       }
     });
   }
+});
+
+test('arithmetic scrolls transform constants on impact and stay in the unlimited library', async (t) => {
+  const cases = [
+    ['add', polynomial(-6), { parameter: 6 }, '0'],
+    ['subtract', polynomial(6), { parameter: 6 }, '0'],
+    ['multiply', polynomial(3), { parameter: 4 }, '12'],
+    ['divide', polynomial(12), { parameter: 3 }, '4'],
+    ['squareRoot', polynomial(16), {}, '4'],
+  ];
+
+  for (const [index, [operatorId, expression, details, expected]] of cases.entries()) {
+    await t.test(operatorId, () => {
+      const state = createGame(480 + index, { levelIndex: 1, skipTutorial: true });
+      freezeSpawns(state);
+      state.effects = [];
+      state.energy = OPERATORS[operatorId].cost;
+      const scroll = state.scrollLibrary.find((item) => item.operatorId === operatorId);
+      Object.assign(scroll, details);
+      const target = testEnemy(expression, { id: `arithmetic-${operatorId}`, speed: 0 });
+      state.enemies = [target];
+
+      assert.equal(selectArsenalItem(state, scroll.id), true);
+      assert.equal(applyTargetOperator(state, target.id), true);
+      assert.equal(state.energy, 0);
+      assert.equal(state.scrollLibrary.some((item) => item.id === scroll.id), true);
+      for (const key of OPERATORS[operatorId].parameterKeys ?? []) {
+        assert.equal(scroll[key], undefined);
+      }
+      const [projectile] = projectileEffects(state);
+      assertProjectile(projectile, operatorId, {
+        targetId: target.id,
+        ...details,
+      });
+      advanceBy(state, projectile.impactIn + 0.001);
+      assert.equal(formatExpression(target.expression), expected);
+    });
+  }
+});
+
+test('invalid heavy arithmetic preflight preserves energy, parameters, and unlimited scrolls', async (t) => {
+  const cases = [
+    ['multiply by zero', 'multiply', polynomial(7), { parameter: 0 }],
+    ['divide by zero', 'divide', polynomial(7), { parameter: 0 }],
+    ['root of a negative', 'squareRoot', polynomial(-4), {}],
+    ['root of a non-square coefficient', 'squareRoot', polynomial(2), {}],
+    ['root of an odd power', 'squareRoot', polynomial([term(4, 1)]), {}],
+    ['root of multiple terms', 'squareRoot', polynomial([term(4, 2), term(9)]), {}],
+  ];
+
+  for (const [index, [name, operatorId, expression, details]] of cases.entries()) {
+    await t.test(name, () => {
+      const state = createGame(490 + index, { levelIndex: 1, skipTutorial: true });
+      freezeSpawns(state);
+      state.effects = [];
+      state.energy = OPERATORS[operatorId].cost;
+      const scroll = state.scrollLibrary.find((item) => item.operatorId === operatorId);
+      Object.assign(scroll, details);
+      const target = testEnemy(expression, { speed: 0 });
+      state.enemies = [target];
+      const energyBefore = state.energy;
+
+      assert.equal(selectArsenalItem(state, scroll.id), true);
+      assert.equal(applyTargetOperator(state, target.id), false);
+      assert.equal(state.energy, energyBefore);
+      assert.equal(state.scrollLibrary.some((item) => item.id === scroll.id), true);
+      for (const [key, value] of Object.entries(details)) assert.equal(scroll[key], value);
+      assert.equal(formatExpression(target.expression), formatExpression(expression));
+      assert.equal(projectileEffects(state).length, 0);
+    });
+  }
+});
+
+test('an unlocked limit scroll can fire repeatedly and only spends energy', () => {
+  const state = createGame(499, { levelIndex: 5, skipTutorial: true });
+  freezeSpawns(state);
+  state.effects = [];
+  state.energy = OPERATORS.limit.cost * 2;
+  const scroll = state.scrollLibrary.find((item) => item.operatorId === 'limit');
+  const first = testEnemy(polynomial([term(1, -1)]), { id: 'limit-first' });
+  const second = testEnemy(polynomial([term(2, -1)]), { id: 'limit-second', row: 1 });
+  state.enemies = [first, second];
+
+  assert.equal(selectArsenalItem(state, scroll.id), true);
+  assert.equal(applyTargetOperator(state, first.id), true);
+  assert.equal(selectArsenalItem(state, scroll.id), true);
+  assert.equal(applyTargetOperator(state, second.id), true);
+
+  assert.equal(state.energy, 0);
+  assert.equal(state.scrollLibrary.some((item) => item.id === scroll.id), true);
+  assert.equal(projectileEffects(state).length, 2);
 });
 
 test('a lane projectile changes the enemy only when their paths intersect', () => {
@@ -1407,7 +1681,7 @@ test('global partial remains retryable when no live target can be hit', () => {
 
   assert.equal(state.partialConfirmOpen, true);
   assert.equal(state.selectedOperatorItemId, cardId);
-  assert.equal(state.operatorQueue.some((item) => item.id === cardId), true);
+  assert.equal(state.scrollLibrary.some((item) => item.id === cardId), true);
   assert.equal(state.energy, energyBefore);
   assert.equal(state.partialUsed, false);
   assert.equal(projectileEffects(state).length, 0);
@@ -1488,7 +1762,7 @@ test('the final impact pulse finishes before endless advances without stale dead
   assert.equal(state.enemies.some((enemy) => enemy.dead), false);
 });
 
-test('global partial differentiation hits each live enemy at its staggered impact', () => {
+test('global z partial differentiation hits each live enemy at its staggered impact', () => {
   const state = createGame(500);
   state.chapterIndex = 3;
   freezeSpawns(state);
@@ -1496,8 +1770,8 @@ test('global partial differentiation hits each live enemy at its staggered impac
   state.effects = [];
   state.operatorQueue = [];
   state.enemies = [
-    testEnemy(polynomial([term(1, 2)]), { id: 'partial-a', row: 0, position: 0.62 }),
-    testEnemy(polynomial([term(1, 3)]), { id: 'partial-b', row: 2, position: 0.81 }),
+    testEnemy(polynomial([term(1, 2, 1)]), { id: 'partial-a', row: 0, position: 0.62 }),
+    testEnemy(polynomial([term(1, 3, 2)]), { id: 'partial-b', row: 2, position: 0.81 }),
     testEnemy(polynomial([term(1, 4)]), {
       id: 'partial-dead', row: 1, position: 0.71, dead: true,
     }),
@@ -1524,26 +1798,26 @@ test('global partial differentiation hits each live enemy at its staggered impac
   assert.equal(projectiles[0].impactIn, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop);
   assert.equal(projectiles[1].delay, 0.035);
   assert.ok(Math.abs(projectiles[1].impactIn - (GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop + 0.035)) < 1e-12);
-  assert.equal(formatExpression(state.enemies[0].expression), 'x^2');
-  assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
+  assert.equal(formatExpression(state.enemies[0].expression), 'x^2z');
+  assert.equal(formatExpression(state.enemies[1].expression), 'x^3z^2');
 
   advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop - 0.001);
-  assert.equal(formatExpression(state.enemies[0].expression), 'x^2');
-  assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
+  assert.equal(formatExpression(state.enemies[0].expression), 'x^2z');
+  assert.equal(formatExpression(state.enemies[1].expression), 'x^3z^2');
   assert.equal(projectiles[0].status, 'flying');
   assert.equal(projectiles[1].status, 'flying');
 
   advanceBy(state, 0.002);
-  assert.equal(formatExpression(state.enemies[0].expression), '2x');
-  assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
+  assert.equal(formatExpression(state.enemies[0].expression), 'x^2');
+  assert.equal(formatExpression(state.enemies[1].expression), 'x^3z^2');
   assert.equal(projectiles[0].status, 'impacted');
   assert.equal(projectiles[0].impactResolved, true);
   assert.equal(projectiles[1].status, 'flying');
 
   advanceBy(state, 0.033);
-  assert.equal(formatExpression(state.enemies[1].expression), 'x^3');
+  assert.equal(formatExpression(state.enemies[1].expression), 'x^3z^2');
   advanceBy(state, 0.002);
-  assert.equal(formatExpression(state.enemies[1].expression), '3x^2');
+  assert.equal(formatExpression(state.enemies[1].expression), '2x^3z');
   assert.equal(projectiles[1].status, 'impacted');
   assert.equal(projectiles[1].impactResolved, true);
 });
@@ -1565,7 +1839,7 @@ test('parameter scroll preflight uses the active shield and preserves an invalid
 
   assert.equal(selectArsenalItem(state, cardId), true);
   assert.equal(applyTargetOperator(state, target.id), false);
-  assert.equal(state.operatorQueue.some((item) => item.id === cardId), true);
+  assert.equal(state.scrollLibrary.some((item) => item.id === cardId), true);
   assert.equal(state.energy, energyBefore);
   assert.equal(formatExpression(target.expression), 'x');
   assert.equal(formatExpression(target.shieldExpression), 'x^-1');
@@ -1670,7 +1944,7 @@ test('tower hits transform a shield to zero before the next hit reaches the body
   assert.equal(state.effects.filter((effect) => effect.type === 'split').length, 1);
 });
 
-test('global partial preview and resolution operate on one active layer per enemy', () => {
+test('global z partial preview and resolution operate on one active layer per enemy', () => {
   const state = createGame(242);
   state.chapterIndex = 3;
   freezeSpawns(state);
@@ -1679,7 +1953,7 @@ test('global partial preview and resolution operate on one active layer per enem
   state.operatorQueue = [];
   const progressingShield = testEnemy(polynomial([term(1, 3)]), {
     id: 'shield-progress',
-    shieldExpression: polynomial([term(1, 2)]),
+    shieldExpression: polynomial([term(1, 2, 2)]),
     shieldActive: true,
     affixes: ['shield'],
   });
@@ -1706,7 +1980,7 @@ test('global partial preview and resolution operate on one active layer per enem
   }));
   assert.deepEqual(preview, [
     {
-      id: 'shield-progress', before: 'x^2', after: '2x', dies: false,
+      id: 'shield-progress', before: 'x^2z^2', after: '2x^2z', dies: false,
       shielded: true, breaksShield: false, layer: 'shield', damageBefore: 1, damageAfter: 2,
     },
     {
@@ -1722,7 +1996,7 @@ test('global partial preview and resolution operate on one active layer per enem
   const energyBefore = state.energy;
   assert.equal(selectArsenalItem(state, cardId), true);
   assert.equal(confirmPartial(state), true);
-  assert.equal(formatExpression(progressingShield.shieldExpression), 'x^2');
+  assert.equal(formatExpression(progressingShield.shieldExpression), 'x^2z^2');
   assert.equal(formatExpression(progressingShield.expression), 'x^3');
   assert.equal(formatExpression(breakingShield.shieldExpression), '7');
   assert.equal(formatExpression(breakingShield.expression), 'x^2');
@@ -1736,7 +2010,7 @@ test('global partial preview and resolution operate on one active layer per enem
 
   const finalImpact = Math.max(...projectileEffects(state).map((effect) => effect.impactIn));
   advanceBy(state, finalImpact + 0.001);
-  assert.equal(formatExpression(progressingShield.shieldExpression), '2x');
+  assert.equal(formatExpression(progressingShield.shieldExpression), '2x^2z');
   assert.equal(formatExpression(progressingShield.expression), 'x^3');
   assert.equal(breakingShield.shieldExpression, null);
   assert.equal(formatExpression(breakingShield.expression), 'x^2');
@@ -1765,6 +2039,7 @@ test('single-target operators transform and clear shields without reaching the b
   state.enemies.push(target);
   const reflectId = addArsenalCard(state, 'reflect');
   const limitId = addArsenalCard(state, 'limit');
+  state.energy = OPERATORS.reflect.cost + OPERATORS.limit.cost;
   const energyBefore = state.energy;
 
   assert.equal(selectArsenalItem(state, reflectId), true);
@@ -1816,7 +2091,7 @@ test('a divergent limit is evaluated against the shield and does not remove it',
   assert.equal(state.effects.filter((effect) => effect.type === 'divergent').length, 1);
 });
 
-test('an Euler scroll clears only the active shield layer and is then consumed', () => {
+test('an Euler scroll clears only the active shield layer and returns blank for reuse', () => {
   const state = createGame(245);
   state.chapterIndex = 4;
   freezeSpawns(state);
@@ -1840,7 +2115,8 @@ test('an Euler scroll clears only the active shield layer and is then consumed',
   assert.equal(target.shieldExpression, null);
   assert.equal(formatExpression(target.expression), 'e^x');
   assert.equal(projectile.status, 'impacted');
-  assert.equal(state.operatorQueue.some((item) => item.id === cardId), false);
+  assert.equal(state.scrollLibrary.some((item) => item.id === cardId), true);
+  assert.equal(state.scrollLibrary.find((item) => item.id === cardId).parameter, undefined);
   assert.equal(state.towers.length, 0);
 });
 
@@ -1867,13 +2143,14 @@ test('a split enemy creates two unmodified non-recursive children', () => {
   assert.ok(children.every((enemy) => enemy.splitExpressions.length === 0));
 });
 
-test('reflect then limit consumes two cards and eliminates e^x', () => {
+test('reflect then limit keep their unlimited scrolls and eliminate e^x', () => {
   const state = createGame(26);
   state.chapterIndex = 5;
   freezeSpawns(state);
   state.operatorQueue = [];
   const reflectId = addArsenalCard(state, 'reflect');
   const limitId = addArsenalCard(state, 'limit');
+  state.energy = OPERATORS.reflect.cost + OPERATORS.limit.cost;
   const target = testEnemy(exponential(1), { id: 'exponential-target', family: 'exponential' });
   state.enemies.push(target);
   selectArsenalItem(state, reflectId);
@@ -1890,7 +2167,8 @@ test('reflect then limit consumes two cards and eliminates e^x', () => {
   assert.equal(state.enemies.length, 0);
   assert.equal(target.dead, true);
   assert.equal(formatExpression(target.expression), '0');
-  assert.equal(state.operatorQueue.length, 0);
+  assert.equal(state.scrollLibrary.some((item) => item.id === reflectId), true);
+  assert.equal(state.scrollLibrary.some((item) => item.id === limitId), true);
 });
 
 test('an unsupported shield integral keeps its arsenal card, energy, and both layers', () => {
@@ -1913,7 +2191,7 @@ test('an unsupported shield integral keeps its arsenal card, energy, and both la
   assert.equal(applyTargetOperator(state, target.id), false);
   assert.equal(state.energy, energyBefore);
   assert.equal(state.rngState, rngBefore);
-  assert.equal(state.operatorQueue.some((item) => item.id === integralId), true);
+  assert.equal(state.scrollLibrary.some((item) => item.id === integralId), true);
   assert.equal(formatExpression(target.expression), 'x');
   assert.equal(formatExpression(target.shieldExpression), 'x^-1ln|x|');
   assert.equal(projectileEffects(state).length, 0);

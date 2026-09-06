@@ -22,9 +22,9 @@ export const ENEMY_GUIDES = deepFreeze({
     clue: '優先處理快進目標，避免它越過正在攻擊其他敵人的砲台。',
   },
   constant: {
-    id: 'constant', label: '常數項', name: '常數背包獸', art: 'enemy-art-polynomial', sample: 'x² + 5',
-    description: '變數項消失後，背包中的常數仍然會繼續前進並造成傷害。',
-    clue: '用 D² 跳過中間係數，或用正確平移精準消去常數。',
+    id: 'constant', label: '常數', name: '常數背包獸', art: 'enemy-art-polynomial', sample: '−3',
+    description: '最簡單的怪物只有一個帶正負號的數字；要把這個數字精準化為 0。',
+    clue: '正數用減法，負數用加法；刻寫與絕對值相同的數字即可消去。',
   },
   higherOrder: {
     id: 'higherOrder', label: '高階多項式', name: '階乘巨獸', art: 'enemy-art-brute', sample: 'x⁵',
@@ -32,12 +32,12 @@ export const ENEMY_GUIDES = deepFreeze({
     clue: 'D² 能一次跨過兩階；奇函數也能利用對稱上下界做定積分。',
   },
   multivariable: {
-    id: 'multivariable', label: '多變數', name: '雙變數紙獸', art: 'enemy-art-wave', sample: 'x²y',
-    description: '對 x 微分時，y 會被視為常數；只含 y 的項對 x 微分會直接歸零。',
-    clue: 'y 只改變讀法，不增加 x 方向的消去階數；依相同 x 次方安排 D 或 D²。',
+    id: 'multivariable', label: '多變數', name: '雙變數紙獸', art: 'enemy-art-wave', sample: 'x²z',
+    description: 'D 只對 x 微分；高耗能的全場捲軸則對 z 偏微分，適合同時壓低多變數項的 z 次方。',
+    clue: 'z 只改變讀法，不增加 x 方向的消去階數；可依相同 x 次方安排 D，或蓄算力用 ∂/∂z。',
   },
   'affix-shield': {
-    id: 'affix-shield', label: '變異・等式護盾', name: '等式護盾', art: 'enemy-art-wave', sample: 'xy',
+    id: 'affix-shield', label: '變異・等式護盾', name: '等式護盾', art: 'enemy-art-wave', sample: 'xz',
     description: '護盾會把一份獨立的式子卡疊在本體上；算子會先改寫護盾式，歸零後才露出本體。',
     clue: '護盾式起始為本體式的複本。先把外層化成 0，下一發才會作用在本體。',
   },
@@ -91,22 +91,19 @@ const tutorial = (config) => ({
 
 export const CHAPTER_TUTORIALS = deepFreeze([
   tutorial({
-    id: 'foundation-recognition', objective: '辨認常數、一次式與二次式，觀察 D 如何完成最後一次消去。',
-    enemyGuideIds: ['constant', 'polynomial'],
-    starterOperators: ['derivative', 'derivative', 'derivative', 'subtract', 'subtract', 'derivative', 'derivative', 'subtract'],
-    starterFormulaIds: ['identityK', 'identityK', 'kPlus10', 'doubleK'], starterConstants: [0, 1, 2, 5],
-    presetTowers: [
-      { typeId: 'derivative', row: 0, column: 1 },
-      { typeId: 'derivative', row: 1, column: 1 },
-    ],
+    id: 'foundation-recognition', objective: '辨認正負常數，分別用加法與減法把數字精準化為 0。',
+    enemyGuideIds: ['constant'],
+    starterOperators: ['add', 'subtract'],
+    starterFormulaIds: ['identityK', 'identityK', 'identityK'], starterConstants: [2, 3, 4],
+    presetTowers: [],
     entries: [
       entry('constant', 0, 0, () => p(term(2))),
-      entry('polynomial', 1, 3.5, () => p(term(1, 1))),
-      entry('polynomial', 0, 7, () => p(term(1, 2))),
+      entry('constant', 1, 3.5, () => p(term(-3))),
+      entry('constant', 0, 7, () => p(term(4))),
     ],
   }),
   tutorial({
-    id: 'factorial-recognition', objective: '比較 D 與 D² 的降階速度；把 D 留給低階敵人。',
+    id: 'factorial-recognition', objective: '比較 D、D² 與 √ 的降階速度；大型算術捲軸先做前處理，最後仍要化為 0。',
     enemyGuideIds: ['higherOrder', 'polynomial'],
     starterOperators: ['secondDerivative', 'secondDerivative', 'integral', 'integral', 'derivative', 'derivative', 'subtract', 'subtract'],
     starterFormulaIds: ['identityK', 'doubleK', 'negateK'], starterConstants: [0, 1, 2],
@@ -115,7 +112,7 @@ export const CHAPTER_TUTORIALS = deepFreeze([
       { typeId: 'derivative', row: 1, column: 1 },
     ],
     entries: [
-      entry('higherOrder', 0, 0, () => p(term(1, 3))),
+      entry('higherOrder', 0, 0, () => p(term(1, 4))),
       entry('higherOrder', 0, 5, () => p(term(1, 5)), { speed: 0.0065 }),
       entry('polynomial', 1, 9, () => p(term(1, 2))),
     ],

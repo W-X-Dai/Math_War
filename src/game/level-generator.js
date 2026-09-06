@@ -76,7 +76,11 @@ function finiteExpression(rng, role) {
   const power = role.powerRange ? integer(rng, role.powerRange[0], role.powerRange[1]) : null;
   switch (role.family) {
     case 'constant':
-      return polynomial([{ coefficient: nonZeroCoefficient(rng, config.constant.coefficientMaximum), xPower: 0, yPower: 0 }]);
+      return polynomial([{
+        coefficient: role.coefficient ?? nonZeroCoefficient(rng, config.constant.coefficientMaximum),
+        xPower: 0,
+        yPower: 0,
+      }]);
     case 'polynomial':
       return polynomial([{ coefficient: nonZeroCoefficient(rng), xPower: power, yPower: 0 }]);
     case 'higherOrder':
@@ -168,12 +172,13 @@ function guaranteeForRequirements(requirements) {
   for (const requirement of requirements) {
     for (const operator of requirement.operators) {
       const definition = OPERATORS[operator.operatorId];
-      if (!definition?.parameterKeys?.length) {
+      const isTower = definition?.kind === 'tower';
+      if (isTower) {
         const rowKey = `${requirement.row}:${operator.operatorId}`;
         if (guaranteedTowerRows.has(rowKey)) continue;
         guaranteedTowerRows.add(rowKey);
       }
-      const copies = definition?.parameterKeys?.length ? (requirement.scrollUses ?? 1) : 1;
+      const copies = isTower ? 1 : (requirement.scrollUses ?? 1);
       for (let copy = 0; copy < copies; copy += 1) {
         guaranteedSupply.operators.push(operator.operatorId);
         if (operator.parameter == null) continue;

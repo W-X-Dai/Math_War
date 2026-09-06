@@ -39,9 +39,11 @@ const weaponTutorialAction = computed(() => {
 });
 const weaponUsage = computed(() => {
   if (newWeapon.value?.kind === 'tower') return '持續型砲台';
-  if (newWeapon.value?.kind === 'global') return '全場一次性武器';
+  if (newWeapon.value?.kind === 'global') return '全場高耗能捲軸';
+  if (newWeapon.value?.category === 'heavy') return '大型算術捲軸';
+  if (newWeapon.value?.category === 'basic') return '基礎算術捲軸';
   if (newWeapon.value?.parameterKeys?.length) return '單體參數捲軸';
-  return '單體一次性武器';
+  return '單體無限捲軸';
 });
 const counterLabels = computed(() => {
   const labels = {
@@ -53,21 +55,26 @@ const counterLabels = computed(() => {
 const weaponSteps = computed(() => {
   if (newWeapon.value?.parameterKeys?.length) {
     return [
-      '先在工坊組出需要的數值，並從常數庫選取。',
+      '單一 0–9、π 或 e 可直接從工坊圓盤拖曳；其他數值先組合存入常數庫。',
       newWeapon.value.parameterKeys.length > 1
-        ? '點擊軍械 Queue 中的捲軸，依序刻寫下界與上界。'
-        : '點擊軍械 Queue 中的捲軸，把已選常數刻寫上去。',
-      '刻寫完成後再點捲軸，然後點選任意一隻敵人施放。',
-      '目標無效或算力不足時，捲軸不會消耗。',
+        ? '把圓盤或已存常數依序拖到捲軸，刻寫下界與上界。'
+        : '把圓盤或已存常數拖到軍械區的空白捲軸刻寫。',
+      '刻寫完成後把捲軸拖到任意一隻敵人；也可沿用點擊施放。',
+      newWeapon.value.category === 'heavy'
+        ? '大型武器耗費較高：乘數與除數不可為 0，先確認公式仍可繼續化簡。'
+        : '發射後捲軸會回到空白狀態；目標無效或算力不足時不扣算力。',
     ];
   }
   if (newWeapon.value?.kind === 'tower') {
     return ['從軍械庫選牌，再點亮地圖空格部署。', '砲台會持續攻擊同一路最前方的敵人。'];
   }
   if (newWeapon.value?.kind === 'global') {
-    return ['從軍械庫選牌，先查看全場公式預覽。', '確認施放後才消耗卡片與算力；每輪限用一次。'];
+    return ['從無限捲軸庫選取，先查看全場公式預覽。', '確認施放後扣除超高算力；捲軸不消耗，但每輪限用一次。'];
   }
-  return ['從軍械庫選牌，再點擊一隻敵人施放。', '目標無效或算力不足時不會消耗卡片。'];
+  if (newWeapon.value?.category === 'heavy') {
+    return ['開根只接受可精確表示的非負完全平方單項式。', '成功發射只扣算力；無法開根時不扣除。'];
+  }
+  return ['從無限捲軸庫選取，再點擊一隻敵人施放。', '成功發射只扣算力；目標無效或算力不足時不扣除。'];
 });
 
 watch(
@@ -92,8 +99,8 @@ watch(
       <button class="icon-button modal-close" type="button" data-action="cancel" aria-label="取消" @click="$emit('cancel')">
         <GameIcon name="close" />
       </button>
-      <h2 id="partial-title">施放全場 ∂/∂x？</h2>
-      <p>每波只能使用一次。偏微分可能消滅敵人，也可能讓係數同時升高。</p>
+      <h2 id="partial-title">施放全場 ∂/∂z？</h2>
+      <p>每波只能使用一次。這個超高耗能捲軸會對每個目標的 z 項做偏微分。</p>
       <ul>
         <template v-if="preview.length">
           <li
@@ -150,7 +157,7 @@ watch(
         </div>
       </div>
       <p id="enemy-tutorial-clue" class="enemy-clue"><strong>判斷提示</strong>{{ newEnemy.clue }}</p>
-      <p class="weapon-tutorial-note">介紹期間整備倒數與三條 Queue 都會暫停；敵人身上不會提示需要幾次運算。</p>
+      <p class="weapon-tutorial-note">介紹期間整備倒數與砲台補給會暫停；敵人身上不會提示需要幾次運算。</p>
       <button
         class="primary-button"
         type="button"
@@ -186,7 +193,7 @@ watch(
       <ol class="weapon-steps">
         <li v-for="step in weaponSteps" :key="step">{{ step }}</li>
       </ol>
-      <p class="weapon-tutorial-note">教學期間整備倒數與三條 Queue 都會暫停。</p>
+      <p class="weapon-tutorial-note">教學期間整備倒數與砲台補給會暫停。</p>
       <button
         class="primary-button"
         type="button"

@@ -65,16 +65,16 @@ export const GENERATION_CONFIG = deepFreeze({
     roles: [
       {
         pressure: [
-          { family: 'constant', powerRange: [0, 0], counter: { operatorIds: ['derivative'] } },
-          { family: 'polynomial', powerRange: [1, 1], counter: { operatorIds: ['derivative'] } },
-          { family: 'polynomial', powerRange: [2, 2], counter: { operatorIds: ['derivative'] } },
-          { family: 'polynomial', powerRange: [1, 2], counter: { operatorIds: ['derivative'] } },
+          { family: 'constant', coefficient: 1, powerRange: [0, 0], counter: { operatorIds: ['subtract'], parameters: [1] } },
+          { family: 'constant', coefficient: -1, powerRange: [0, 0], counter: { operatorIds: ['add'], parameters: [1] } },
+          { family: 'constant', coefficient: 2, powerRange: [0, 0], counter: { operatorIds: ['subtract'], parameters: [2] } },
+          { family: 'constant', coefficient: -2, powerRange: [0, 0], counter: { operatorIds: ['add'], parameters: [2] } },
         ],
         mixed: [
-          { family: 'constant', powerRange: [0, 0], counter: { operatorIds: ['derivative'] } },
-          { family: 'polynomial', powerRange: [1, 1], counter: { operatorIds: ['derivative'] } },
-          { family: 'polynomial', powerRange: [2, 2], counter: { operatorIds: ['derivative'] } },
-          { family: 'polynomial', powerRange: [1, 2], counter: { operatorIds: ['derivative'] } },
+          { family: 'constant', coefficient: 3, powerRange: [0, 0], counter: { operatorIds: ['subtract'], parameters: [3] } },
+          { family: 'constant', coefficient: -3, powerRange: [0, 0], counter: { operatorIds: ['add'], parameters: [3] } },
+          { family: 'constant', coefficient: 4, powerRange: [0, 0], counter: { operatorIds: ['subtract'], parameters: [4] } },
+          { family: 'constant', coefficient: -4, powerRange: [0, 0], counter: { operatorIds: ['add'], parameters: [4] } },
         ],
       },
       {

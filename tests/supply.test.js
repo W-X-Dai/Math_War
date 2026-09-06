@@ -5,6 +5,7 @@ import {
   CHAPTERS,
   CONSTANT_QUEUE_CAPACITY,
   FORMULA_QUEUE_CAPACITY,
+  OPERATORS,
   OPERATOR_QUEUE_CAPACITY,
 } from '../src/game/content.js';
 import {
@@ -27,8 +28,8 @@ function clearWave(state) {
   tick(state, 0.01);
 }
 
-function reachFirstFormalSegment(seed = 42) {
-  const state = createGame(seed);
+function reachFirstFormalSegment(seed = 42, levelIndex = 0) {
+  const state = createGame(seed, { levelIndex });
   startGame(state);
   dismissIntroductions(state);
   clearWave(state);
@@ -36,7 +37,7 @@ function reachFirstFormalSegment(seed = 42) {
   return state;
 }
 
-test('formal segment injects one-time guaranteed cards without consuming random RNG', () => {
+test('formal segment injects only guaranteed towers and parameter materials without consuming random RNG', () => {
   const state = createGame(41);
   startGame(state);
   dismissIntroductions(state);
@@ -46,10 +47,16 @@ test('formal segment injects one-time guaranteed cards without consuming random 
   const supply = state.currentWave.guaranteedSupply;
   assert.ok(supply.operators.length > 0);
   assert.equal(state.rngState, rngBefore);
+  const guaranteedTowers = supply.operators.filter((operatorId) => OPERATORS[operatorId]?.kind === 'tower');
   assert.deepEqual(
     state.operatorQueue.filter((item) => item.source === 'guaranteed').map((item) => item.operatorId),
-    supply.operators,
+    guaranteedTowers,
   );
+  assert.ok(supply.operators
+    .filter((operatorId) => OPERATORS[operatorId]?.kind !== 'tower')
+    .every((operatorId) => state.scrollLibrary.some((item) => (
+      item.operatorId === operatorId && item.source === 'unlimited' && item.unlimited
+    ))));
   assert.deepEqual(
     state.formulaQueue.filter((item) => item.source === 'guaranteed').map((item) => item.cardId),
     supply.formulaIds,
@@ -62,7 +69,7 @@ test('formal segment injects one-time guaranteed cards without consuming random 
 });
 
 test('guaranteed cards bypass full capacities and random refill pauses until space returns', () => {
-  const state = createGame(42);
+  const state = createGame(42, { levelIndex: 1 });
   startGame(state);
   dismissIntroductions(state);
   state.tutorialSnapshot.operatorQueue = Array.from(
@@ -96,9 +103,9 @@ test('guaranteed cards bypass full capacities and random refill pauses until spa
   assert.equal(state.rngState, rng);
 });
 
-test('every queue uses seeded random refill in addition to one-time guarantees', () => {
-  const first = reachFirstFormalSegment(77);
-  const replay = reachFirstFormalSegment(77);
+test('tower and compatibility material queues use seeded random refill in addition to guarantees', () => {
+  const first = reachFirstFormalSegment(77, 1);
+  const replay = reachFirstFormalSegment(77, 1);
   for (const state of [first, replay]) {
     state.operatorQueue = [];
     state.formulaQueue = [];
@@ -114,6 +121,21 @@ test('every queue uses seeded random refill in addition to one-time guarantees',
   assert.ok(first.operatorQueue.every((item) => item.source === 'random'));
   assert.ok(first.formulaQueue.every((item) => item.source === 'random'));
   assert.ok(first.constantQueue.every((item) => item.source === 'random'));
+});
+
+test('chapter one keeps basic arithmetic scrolls permanent without adding consumable copies', () => {
+  const state = reachFirstFormalSegment(771, 0);
+  const scrollIds = state.scrollLibrary.map((item) => item.id);
+
+  assert.deepEqual(state.operatorQueue, []);
+  assert.deepEqual(state.scrollLibrary.map((item) => item.operatorId), ['add', 'subtract']);
+  assert.ok(state.scrollLibrary.every((item) => item.source === 'unlimited' && item.unlimited));
+
+  clearWave(state);
+  assert.equal(state.currentWave.segmentIndex, 2);
+  assert.deepEqual(state.operatorQueue, []);
+  assert.deepEqual(state.scrollLibrary.map((item) => item.id), scrollIds);
+  assert.equal(new Set(state.scrollLibrary.map((item) => item.operatorId)).size, 2);
 });
 
 test('queues and energy survive pressure and mixed, then remain at the won result', () => {

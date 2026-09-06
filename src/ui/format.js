@@ -35,6 +35,12 @@ export function prettyFormula(value) {
 
 export function formatValue(value) {
   if (Number.isInteger(value)) return String(value);
+  const eRatio = value / Math.E;
+  const commonE = [
+    [-2, '−2e'], [-1, '−e'], [-0.5, '−e/2'],
+    [0.5, 'e/2'], [1, 'e'], [2, '2e'],
+  ].find(([ratio]) => Math.abs(eRatio - ratio) < 1e-10);
+  if (commonE) return commonE[1];
   const piRatio = value / Math.PI;
   const commonPi = [
     [-2, '−2π'], [-1, '−π'], [-0.5, '−π/2'],
