@@ -62,3 +62,21 @@ test('workbench exposes draggable constant discs and scrolls have a separate unl
   assert.match(dock, /return 'd\/dx'/);
   assert.match(dock, /return 'd²\/dx²'/);
 });
+
+test('tower tutorials visibly teach both click and drag deployment paths', async () => {
+  const [overlay, dock, battlefield, prep] = await Promise.all([
+    readFile(new URL('../src/components/GameOverlay.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/OperatorDock.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/BattlefieldStage.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/WavePrepBar.vue', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(overlay, /點擊砲台牌，再點戰場上的發亮格子；或直接把砲台牌拖曳到格子/);
+  assert.match(dock, /class="tutorial-action-badge">點我或拖曳/);
+  assert.match(dock, /data-tutorial-goal/);
+  assert.match(battlefield, /is-tutorial-target/);
+  assert.match(battlefield, /aria-live="polite"/);
+  assert.match(prep, /tutorialDeployment\.completed/);
+  assert.doesNotMatch(prep, /教學預置/);
+  assert.doesNotMatch(battlefield, /tutorialPreset|教學預置/);
+});

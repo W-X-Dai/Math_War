@@ -115,7 +115,7 @@ test('chapter one is a constant-only arithmetic introduction', () => {
   assert.deepEqual(new Set(chapter.starterOperators), new Set(['add', 'subtract']));
   assert.deepEqual(tutorial.enemyGuideIds, ['constant']);
   assert.deepEqual(new Set(tutorial.starterOperators), new Set(['add', 'subtract']));
-  assert.deepEqual(tutorial.presetTowers, []);
+  assert.deepEqual(tutorial.deploymentGoals, []);
   assert.ok(wave.entries.length >= 2);
   assert.ok(wave.entries.every((entry) => entry.family === 'constant'));
   assert.ok(wave.entries.every((entry) => {
@@ -134,7 +134,7 @@ test('projectile timing and exit boundary preserve the deliberate slow-flight co
   assert.ok(GAMEPLAY_CONFIG.geometry.projectileExitPosition > 1);
 });
 
-test('recognition tutorials are fixed two-to-three enemy sandboxes without affixes', () => {
+test('recognition tutorials are fixed hands-on sandboxes without pre-placed towers', () => {
   assert.equal(CHAPTER_TUTORIALS.length, 6);
   CHAPTER_TUTORIALS.forEach((tutorial, chapterIndex) => {
     const wave = generateTutorialWave(chapterIndex);
@@ -143,11 +143,23 @@ test('recognition tutorials are fixed two-to-three enemy sandboxes without affix
     assert.ok(wave.entries.every((entry) => tutorial.enemyGuideIds.includes(entry.family)));
     assert.ok(tutorial.enemyGuideIds.every((id) => ENEMY_GUIDES[id]));
     assert.ok(tutorial.starterOperators.length <= OPERATOR_QUEUE_CAPACITY);
-    for (const tower of tutorial.presetTowers) {
-      assert.ok(OPERATORS[tower.typeId]);
-      assert.equal(OPERATORS[tower.typeId].kind, 'tower');
-      assert.ok(tower.row >= 0 && tower.row < CHAPTERS[chapterIndex].board.rows);
-      assert.ok(tower.column >= 0 && tower.column < CHAPTERS[chapterIndex].board.placeableColumns);
+    assert.deepEqual(wave.deploymentGoals, tutorial.deploymentGoals);
+    const availableTowerCounts = tutorial.starterOperators.reduce((counts, operatorId) => {
+      if (OPERATORS[operatorId]?.kind === 'tower') {
+        counts.set(operatorId, (counts.get(operatorId) ?? 0) + 1);
+      }
+      return counts;
+    }, new Map());
+    const requiredTowerCounts = new Map();
+    for (const goal of tutorial.deploymentGoals) {
+      assert.ok(OPERATORS[goal.typeId]);
+      assert.equal(OPERATORS[goal.typeId].kind, 'tower');
+      assert.ok(OPERATORS[goal.typeId].unlockChapter <= chapterIndex);
+      assert.ok(goal.row >= 0 && goal.row < CHAPTERS[chapterIndex].board.rows);
+      requiredTowerCounts.set(goal.typeId, (requiredTowerCounts.get(goal.typeId) ?? 0) + 1);
+    }
+    for (const [operatorId, count] of requiredTowerCounts) {
+      assert.ok(availableTowerCounts.get(operatorId) >= count);
     }
   });
 });

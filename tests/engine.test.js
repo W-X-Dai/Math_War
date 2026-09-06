@@ -41,6 +41,7 @@ import {
   startWave,
   storeNumericConstant,
   tick,
+  tutorialDeploymentProgress,
   togglePause,
 } from '../src/game/engine.js';
 import {
@@ -166,8 +167,8 @@ test('the compatible default starts level one with its deterministic tutorial sa
   assert.equal(first.operatorQueue.length, towerIds(CHAPTER_TUTORIALS[0].starterOperators).length);
   assert.deepEqual(first.operatorQueue.map((item) => item.operatorId), towerIds(CHAPTER_TUTORIALS[0].starterOperators));
   assert.deepEqual(first.scrollLibrary.map((item) => item.operatorId), ['add', 'subtract']);
-  assert.equal(first.towers.length, CHAPTER_TUTORIALS[0].presetTowers.length);
-  assert.ok(first.towers.every((tower) => tower.tutorialPreset));
+  assert.equal(first.towers.length, 0);
+  assert.deepEqual(first.currentWave.deploymentGoals, CHAPTER_TUTORIALS[0].deploymentGoals);
   assert.deepEqual(
     first.tutorialSnapshot.operatorQueue.map((item) => item.operatorId),
     towerIds(CHAPTERS[0].starterOperators),
@@ -180,10 +181,58 @@ test('the compatible default starts level one with its deterministic tutorial sa
     first.tutorialSnapshot.constantQueue.map((item) => item.value),
     CHAPTERS[0].starterConstants,
   );
-  const presetTowerCount = first.towers.length;
-  assert.equal(presetTowerCount, 0);
+  const towerCount = first.towers.length;
   assert.equal(discardTower(first, 'missing-tutorial-tower'), false);
-  assert.equal(first.towers.length, presetTowerCount);
+  assert.equal(first.towers.length, towerCount);
+});
+
+test('tower tutorials wait for player click or drag deployment on the guided lanes', () => {
+  const state = createGame(12346, { levelIndex: 1 });
+  startGame(state);
+  dismissIntroductions(state);
+
+  const initialEnergy = state.energy;
+  const initialPrep = state.prepRemaining;
+  assert.equal(state.towers.length, 0);
+  assert.deepEqual(tutorialDeploymentProgress(state).next, {
+    typeId: 'secondDerivative', row: 0, complete: false, towerId: null,
+  });
+  assert.equal(startWave(state), false);
+  tick(state, 1);
+  assert.equal(state.prepRemaining, initialPrep);
+
+  const secondDerivative = state.operatorQueue.find((item) => item.operatorId === 'secondDerivative');
+  assert.equal(discardArsenalItem(state, secondDerivative.id), false);
+  assert.ok(state.operatorQueue.some((item) => item.id === secondDerivative.id));
+  assert.equal(selectArsenalItem(state, secondDerivative.id), true);
+  assert.equal(placeTower(state, 0, 0), true);
+  assert.equal(state.energy, initialEnergy);
+  assert.equal(state.towers[0].tutorialDeployment, true);
+  assert.equal(tutorialDeploymentProgress(state).completed, 1);
+
+  const derivative = state.operatorQueue.find((item) => item.operatorId === 'derivative');
+  assert.equal(deployTowerFromArsenal(state, derivative.id, 0, 1), false);
+  assert.ok(state.operatorQueue.some((item) => item.id === derivative.id));
+  assert.equal(deployTowerFromArsenal(state, derivative.id, 1, 0), true);
+  assert.equal(state.energy, initialEnergy);
+  assert.equal(tutorialDeploymentProgress(state).complete, true);
+  assert.equal(startWave(state), true);
+});
+
+test('guided tutorial towers can be returned and redeployed without trapping the player', () => {
+  const state = createGame(12347, { levelIndex: 2 });
+  startGame(state);
+  dismissIntroductions(state);
+  const derivative = state.operatorQueue.find((item) => item.operatorId === 'derivative');
+  const initialEnergy = state.energy;
+
+  assert.equal(deployTowerFromArsenal(state, derivative.id, 1, 0), true);
+  assert.equal(tutorialDeploymentProgress(state).complete, true);
+  assert.equal(recycleTower(state, state.towers[0].id), true);
+  assert.equal(state.towers.length, 0);
+  assert.equal(state.energy, initialEnergy);
+  assert.equal(tutorialDeploymentProgress(state).complete, false);
+  assert.ok(state.operatorQueue.some((item) => item.operatorId === 'derivative'));
 });
 
 test('all six levels can start independently with their own fresh formal loadout', () => {
@@ -388,11 +437,39 @@ test('clearing a tutorial wave restores sandbox state and opens the seeded chall
   assert.deepEqual(state.currentWave, generateFiniteWave(112, 0));
 });
 
-test('losing a tutorial wave restarts its sandbox instead of ending the run', () => {
-  const state = createGame(113);
+test('clearing a guided tower tutorial discards its player deployments', () => {
+  const state = createGame(1121, { levelIndex: 1 });
   startGame(state);
   dismissIntroductions(state);
-  state.phase = 'running';
+  const formalEnergy = state.tutorialSnapshot.energy;
+  const secondDerivative = state.operatorQueue.find((item) => item.operatorId === 'secondDerivative');
+  const derivative = state.operatorQueue.find((item) => item.operatorId === 'derivative');
+  assert.equal(deployTowerFromArsenal(state, secondDerivative.id, 0, 0), true);
+  assert.equal(deployTowerFromArsenal(state, derivative.id, 1, 0), true);
+  assert.equal(startWave(state), true);
+
+  state.currentWave = { ...state.currentWave, entries: [] };
+  state.nextSpawnIndex = 0;
+  tick(state, 0.01);
+
+  assert.equal(state.currentWave.kind, 'challenge');
+  assert.equal(state.currentWave.segmentIndex, 1);
+  assert.equal(state.towers.length, 0);
+  assert.equal(state.energy, formalEnergy);
+  assert.equal(state.tutorialSnapshot, null);
+});
+
+test('losing a tutorial wave restarts its sandbox instead of ending the run', () => {
+  const state = createGame(113, { levelIndex: 1 });
+  startGame(state);
+  dismissIntroductions(state);
+  const initialEnergy = state.energy;
+  const initialTowerCards = state.operatorQueue.length;
+  const secondDerivative = state.operatorQueue.find((item) => item.operatorId === 'secondDerivative');
+  const derivative = state.operatorQueue.find((item) => item.operatorId === 'derivative');
+  assert.equal(deployTowerFromArsenal(state, secondDerivative.id, 0, 0), true);
+  assert.equal(deployTowerFromArsenal(state, derivative.id, 1, 0), true);
+  assert.equal(startWave(state), true);
   state.baseHp = 0;
   tick(state, 0.01);
   assert.equal(state.phase, 'preparing');
@@ -400,7 +477,10 @@ test('losing a tutorial wave restarts its sandbox instead of ending the run', ()
   assert.equal(state.currentWave.kind, 'tutorial');
   assert.equal(state.enemyTutorialQueue.length, 0);
   assert.equal(state.weaponTutorialQueue.length, 0);
-  assert.ok(state.towers.every((tower) => tower.tutorialPreset));
+  assert.equal(state.towers.length, 0);
+  assert.equal(state.energy, initialEnergy);
+  assert.equal(state.operatorQueue.length, initialTowerCards);
+  assert.equal(tutorialDeploymentProgress(state).complete, false);
 });
 
 test('placing a tower consumes one matching card and its energy cost', () => {

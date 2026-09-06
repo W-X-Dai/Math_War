@@ -4,7 +4,11 @@ import { computed } from 'vue';
 import { PRESENTATION_CONFIG } from '../config/presentation.js';
 import { formatExpression } from '../domain/expression.js';
 import { CHAPTERS, ENEMY_TYPES, OPERATORS } from '../game/content.js';
-import { activeEnemyExpression, enemyThreat } from '../game/engine.js';
+import {
+  activeEnemyExpression,
+  enemyThreat,
+  tutorialDeploymentProgress,
+} from '../game/engine.js';
 import {
   ENEMY_CARD_CSS_VARIABLES,
   enemyCardPlacement,
@@ -72,6 +76,24 @@ const draggingTargetOperator = computed(() => (
 const recycleTargeting = computed(() => (
   props.recycleArmed || props.dragPayload?.kind === 'recycle-tool'
 ));
+const tutorialDeployment = computed(() => tutorialDeploymentProgress(props.state));
+const pendingDeploymentGoal = computed(() => tutorialDeployment.value.next);
+const tutorialPromptTitle = computed(() => {
+  if (pendingDeploymentGoal.value) return '輪到你親自部署砲台';
+  if (tutorialDeployment.value.total > 0 && props.state.phase === 'preparing') return '部署完成，準備迎敵';
+  return '用點擊或拖曳完成操作';
+});
+const tutorialPrompt = computed(() => {
+  const goal = pendingDeploymentGoal.value;
+  if (goal) {
+    const operator = OPERATORS[goal.typeId];
+    return `點擊上方「${operator?.name ?? '指定砲台'}」，再點第 ${goal.row + 1} 路的發亮格子；也可以直接把砲台牌拖到該路。`;
+  }
+  if (tutorialDeployment.value.total > 0 && props.state.phase === 'preparing') {
+    return '很好！指定砲台都由你完成部署。確認位置後，按下「開始教學波」。';
+  }
+  return '你可以點擊軍械再點目標，也可以直接把砲台拖到格子、把捲軸拖到敵人。';
+});
 
 const formulaText = (expression) => prettyFormula(formatExpression(expression));
 const formulaClass = (expression) => enemyFormulaClasses(formulaText(expression));
@@ -164,9 +186,24 @@ function occupied(row, column) {
   return props.state.towers.some((tower) => tower.row === row && tower.column === column);
 }
 
+function isTutorialTargetCell(cell) {
+  return Boolean(
+    pendingDeploymentGoal.value
+    && cell.placement
+    && cell.row === pendingDeploymentGoal.value.row
+    && !occupied(cell.row, cell.column),
+  );
+}
+
+function cellLabel(cell) {
+  const base = `第 ${cell.row + 1} 路，第 ${cell.column + 1} 格${cell.placement ? '' : '，不可放置'}`;
+  if (!isTutorialTargetCell(cell)) return base;
+  return `${base}，教學建議位置，可點擊或拖曳${OPERATORS[pendingDeploymentGoal.value.typeId]?.name ?? '砲台'}到此`;
+}
+
 function towerLabel(tower) {
-  if (tower.tutorialPreset) {
-    return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，教學預置且已鎖定，不可回收，耐久 ${Math.max(0, Math.ceil(tower.hp))}`;
+  if (tower.tutorialDeployment && props.state.currentWave?.kind === 'tutorial') {
+    return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，由你完成的教學部署，耐久 ${Math.max(0, Math.ceil(tower.hp))}；按 Delete 可收回並把牌放回工房`;
   }
   let interaction = '運作中；按 Delete 可回收並取回一半算力';
   if (recycleTargeting.value) {
@@ -348,10 +385,11 @@ function effectStyle(effect) {
             'is-invalid': cell.placement && Boolean(state.selectedOperator) && occupied(cell.row, cell.column),
             'is-drag-placeable': cell.placement && draggingTower && !occupied(cell.row, cell.column),
             'is-drag-invalid': cell.placement && draggingTower && occupied(cell.row, cell.column),
+            'is-tutorial-target': isTutorialTargetCell(cell),
           }"
           type="button"
           :disabled="!cell.placement"
-          :aria-label="`第 ${cell.row + 1} 路，第 ${cell.column + 1} 格${cell.placement ? '' : '，不可放置'}`"
+          :aria-label="cellLabel(cell)"
           @click="$emit('place-tower', cell.row, cell.column)"
         ><span aria-hidden="true">＋</span></button>
       </div>
@@ -366,21 +404,18 @@ function effectStyle(effect) {
           :class="{
             'is-firing': tower.fireFlash > 0,
             'is-error-stopped': !tower.active,
-            'is-recycle-target': recycleTargeting && !tower.tutorialPreset,
+            'is-recycle-target': recycleTargeting,
             'is-recycle-over': dragOverTowerId === tower.id,
-            'is-tutorial-preset': tower.tutorialPreset,
           }"
           type="button"
           :style="laneStyle(tower.row, tower.position)"
           :aria-label="towerLabel(tower)"
-          :aria-disabled="tower.tutorialPreset ? 'true' : undefined"
-          :aria-keyshortcuts="tower.tutorialPreset ? undefined : 'Delete'"
-          :data-recycle-tower-id="tower.tutorialPreset ? undefined : tower.id"
-          @click="!tower.tutorialPreset && $emit('tower', tower.id)"
+          aria-keyshortcuts="Delete"
+          :data-recycle-tower-id="tower.id"
+          @click="$emit('tower', tower.id)"
         >
           <span class="tower-sprite" :class="OPERATORS[tower.typeId].art" aria-hidden="true"></span>
-          <span v-if="tower.tutorialPreset" class="tutorial-preset-badge" aria-hidden="true">教學預置</span>
-          <span v-else-if="!tower.active" class="tower-error-badge" aria-hidden="true">
+          <span v-if="!tower.active" class="tower-error-badge" aria-hidden="true">
             <b>運算錯誤停火</b><small>重新裝填</small>
           </span>
           <span class="tower-status"><i :style="{ width: `${Math.max(0, tower.hp / tower.maxHp) * 100}%` }"></i></span>
@@ -471,12 +506,12 @@ function effectStyle(effect) {
       </div>
 
       <div class="tutorial-anchor" data-bind="tutorial">
-        <article v-if="state.tutorialVisible && state.phase !== 'intro'" class="tutorial-card">
+        <article v-if="state.tutorialVisible && state.phase !== 'intro'" class="tutorial-card" aria-live="polite">
           <button class="icon-button" type="button" data-action="dismiss-tutorial" aria-label="關閉教學" @click="$emit('dismiss-tutorial')">
             <GameIcon name="close" />
           </button>
-          <strong>{{ state.currentWave?.kind === 'tutorial' ? '固定教學波・依提示選擇軍械' : '從軍械庫選擇適合的算子' }}</strong>
-          <p>{{ state.currentWave?.kind === 'tutorial' ? (state.currentWave?.objective ?? '觀察新敵人，使用指定軍械將公式化為 0。') : '第一關用加減捲軸精準消去常數；後續砲台只攻擊同一路。注意敵人的函數族與變異徽章。' }}</p>
+          <strong>{{ state.currentWave?.kind === 'tutorial' ? tutorialPromptTitle : '從軍械庫選擇適合的算子' }}</strong>
+          <p>{{ state.currentWave?.kind === 'tutorial' ? tutorialPrompt : '第一關用加減捲軸精準消去常數；後續砲台只攻擊同一路。注意敵人的函數族與變異徽章。' }}</p>
           <button class="secondary-button" type="button" data-action="dismiss-tutorial" @click="$emit('dismiss-tutorial')">知道了</button>
         </article>
       </div>

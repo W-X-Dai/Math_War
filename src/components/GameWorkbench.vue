@@ -23,6 +23,7 @@ const selectedStoredConstant = computed(() => storedConstants.value.find(
   (item) => item.id === props.state.selectedStoredConstantId,
 ) ?? null);
 const storedFull = computed(() => storedConstants.value.length >= STORED_CONSTANT_CAPACITY);
+const isTutorialWave = computed(() => props.state.currentWave?.kind === 'tutorial');
 const evaluation = computed(() => {
   try {
     const value = evaluateConstantExpression(draft.value);
@@ -137,9 +138,9 @@ function saveConstant() {
     </section>
 
     <section class="recycle-toolbox" aria-labelledby="recycle-tool-heading">
-      <div><h3 id="recycle-tool-heading">砲塔回收</h3><p>拖曳鏟子到砲塔，或先啟用再點選；返還原價一半算力。</p></div>
+      <div><h3 id="recycle-tool-heading">砲塔回收</h3><p>{{ isTutorialWave ? '拖曳鏟子到砲塔，或先啟用再點選；免費教學塔會把牌放回工房。' : '拖曳鏟子到砲塔，或先啟用再點選；返還原價一半算力。' }}</p></div>
       <button class="recycle-tool" :class="{ 'is-armed': recycleArmed, 'is-dragging': dragPayload?.kind === 'recycle-tool' }" type="button" data-action="toggle-recycle" data-drag-kind="recycle-tool" data-drag-id="shovel" draggable="true" :aria-pressed="recycleArmed" @click="$emit('toggle-recycle')">
-        <GameIcon name="shovel" /><span>{{ recycleArmed ? '選擇砲塔' : '回收鏟' }}</span><small>{{ recycleArmed ? 'Esc 取消' : '返還 50%' }}</small>
+        <GameIcon name="shovel" /><span>{{ recycleArmed ? '選擇砲塔' : '回收鏟' }}</span><small>{{ recycleArmed ? 'Esc 取消' : (isTutorialWave ? '免費塔退牌' : '返還 50%') }}</small>
       </button>
     </section>
 

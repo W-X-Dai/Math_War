@@ -1023,26 +1023,6 @@ function towerHp(typeId) {
   return COMBAT.tower.defaultHp;
 }
 
-function createPresetTower(state, spec) {
-  if (OPERATORS[spec.typeId]?.kind !== 'tower') {
-    throw new RangeError(`Tutorial preset ${spec.typeId} is not a tower`);
-  }
-  const hp = towerHp(spec.typeId);
-  return {
-    id: nextId(state, 'tutorial-tower'),
-    typeId: spec.typeId,
-    row: spec.row,
-    column: spec.column,
-    position: towerPosition(spec.column, state.board),
-    hp,
-    maxHp: hp,
-    cooldown: COMBAT.tower.presetInitialCooldownSeconds,
-    fireFlash: 0,
-    active: true,
-    tutorialPreset: true,
-  };
-}
-
 function resetWaveRuntime(state, wave) {
   state.enemies = [];
   state.effects = [];
@@ -1065,7 +1045,7 @@ function resetWaveRuntime(state, wave) {
   state.bannerTimer = EFFECTS.waveBannerSeconds;
 }
 
-function configureWave(state, config, supply, wave, presetTowers = [], source = 'tutorial') {
+function configureWave(state, config, supply, wave, source = 'tutorial') {
   state.energy = config.startingEnergy;
   state.operatorQueue = queueItems(
     state,
@@ -1085,7 +1065,7 @@ function configureWave(state, config, supply, wave, presetTowers = [], source = 
   if (!state.storedConstants.some((item) => item.id === state.selectedStoredConstantId)) {
     state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
   }
-  state.towers = presetTowers.map((tower) => createPresetTower(state, tower));
+  state.towers = [];
   resetWaveRuntime(state, wave);
 }
 
@@ -1186,7 +1166,7 @@ function restoreTutorialState(state) {
 function setupTutorialWave(state, chapterIndex, showIntroductions) {
   const config = CHAPTERS[chapterIndex];
   const tutorial = chapterTutorial(chapterIndex);
-  configureWave(state, config, tutorial, generateTutorialWave(chapterIndex), tutorial.presetTowers);
+  configureWave(state, config, tutorial, generateTutorialWave(chapterIndex));
   state.enemyTutorialQueue = showIntroductions ? chapterEnemyTutorials(chapterIndex) : [];
   state.weaponTutorialQueue = showIntroductions ? chapterWeaponTutorials(chapterIndex) : [];
 }
@@ -1224,7 +1204,6 @@ function initializeLevel(state, levelIndex, skipTutorial) {
     config,
     config,
     generateFiniteSegment(state.runSeed, levelIndex, 1),
-    [],
     'starter',
   );
   state.enemyTutorialQueue = [];
@@ -1253,7 +1232,6 @@ function initializeEndless(state) {
     ENDLESS_CHAPTER,
     ENDLESS_CHAPTER,
     generateEndlessWave(state.runSeed, 1),
-    [],
     'starter',
   );
   grantGuaranteedSupply(state, state.currentWave);
@@ -1352,9 +1330,33 @@ export function startGame(state) {
     addLog(state, `第 ${state.chapterIndex + 1} 關壓力段整備開始；已略過教學。`, 'success');
   } else {
     state.tutorialVisible = true;
-    addLog(state, `第 ${state.chapterIndex + 1} 關教學開始：先認識新敵人與固定教具。`, 'success');
+    addLog(state, `第 ${state.chapterIndex + 1} 關教學開始：先認識新敵人，再親自點擊或拖曳軍械。`, 'success');
   }
   return true;
+}
+
+export function tutorialDeploymentProgress(state) {
+  const goals = state.currentWave?.kind === 'tutorial'
+    ? (state.currentWave.deploymentGoals ?? [])
+    : [];
+  const matchedTowerIds = new Set();
+  const annotatedGoals = goals.map((goal) => {
+    const tower = state.towers.find((candidate) => (
+      !matchedTowerIds.has(candidate.id)
+      && candidate.typeId === goal.typeId
+      && candidate.row === goal.row
+    ));
+    if (tower) matchedTowerIds.add(tower.id);
+    return { ...goal, complete: Boolean(tower), towerId: tower?.id ?? null };
+  });
+  const completed = annotatedGoals.filter((goal) => goal.complete).length;
+  return {
+    goals: annotatedGoals,
+    completed,
+    total: annotatedGoals.length,
+    complete: completed === annotatedGoals.length,
+    next: annotatedGoals.find((goal) => !goal.complete) ?? null,
+  };
 }
 
 function beginWave(state, awardEarly) {
@@ -1390,6 +1392,16 @@ export function startWave(state) {
     notify(state, '先看完本章敵人與軍械教學。', 'danger');
     return false;
   }
+  const deployment = tutorialDeploymentProgress(state);
+  if (!deployment.complete && deployment.next) {
+    const operator = OPERATORS[deployment.next.typeId];
+    notify(
+      state,
+      `請先點擊或拖曳${operator?.name ?? '指定砲台'}，部署到第 ${deployment.next.row + 1} 路。`,
+      'danger',
+    );
+    return false;
+  }
   return beginWave(state, true);
 }
 
@@ -1400,6 +1412,7 @@ export function tick(state, rawDt) {
 
   if (state.phase === 'preparing') {
     if (state.enemyTutorialQueue.length > 0 || state.weaponTutorialQueue.length > 0) return;
+    if (!tutorialDeploymentProgress(state).complete) return;
     updateQueues(state, dt);
     state.prepRemaining = Math.max(0, state.prepRemaining - dt);
     if (state.prepRemaining <= 0) beginWave(state, false);
@@ -1550,9 +1563,22 @@ export function deployTowerFromArsenal(state, itemId, row, column) {
     notify(state, '這個位置已經有裝置了。', 'danger');
     return false;
   }
-  if (state.energy < operator.cost) return false;
+  const tutorialGoal = state.phase === 'preparing'
+    ? tutorialDeploymentProgress(state).next
+    : null;
+  if (tutorialGoal && (tutorialGoal.typeId !== operator.id || tutorialGoal.row !== row)) {
+    const goalOperator = OPERATORS[tutorialGoal.typeId];
+    notify(
+      state,
+      `教學下一步：請把${goalOperator?.name ?? '指定砲台'}部署到第 ${tutorialGoal.row + 1} 路。`,
+      'danger',
+    );
+    return false;
+  }
+  const guidedTutorialDeployment = Boolean(tutorialGoal);
+  if (!guidedTutorialDeployment && state.energy < operator.cost) return false;
 
-  state.energy -= operator.cost;
+  if (!guidedTutorialDeployment) state.energy -= operator.cost;
   consumeOperatorItem(state, itemId);
   const hp = towerHp(operator.id);
   state.towers.push({
@@ -1566,9 +1592,17 @@ export function deployTowerFromArsenal(state, itemId, row, column) {
     cooldown: COMBAT.tower.defaultInitialCooldownSeconds,
     fireFlash: 0,
     active: true,
+    ...(guidedTutorialDeployment ? { tutorialDeployment: true } : {}),
   });
   cancelSelection(state);
-  addLog(state, `放置 ${operator.symbol} ${operator.name}`, 'success');
+  addLog(
+    state,
+    `${guidedTutorialDeployment ? '完成教學部署' : '放置'} ${operator.symbol} ${operator.name}`,
+    'success',
+  );
+  if (guidedTutorialDeployment) {
+    notify(state, `${operator.name}部署完成；教學配置不消耗算力。`, 'success');
+  }
   return true;
 }
 
@@ -1581,9 +1615,17 @@ export function placeTower(state, row, column) {
 export function recycleTower(state, towerId) {
   const tower = state.towers.find((candidate) => candidate.id === towerId);
   if (!tower) return false;
-  if (tower.tutorialPreset) {
-    notify(state, '教學預置砲台不能回收。', 'neutral');
-    return false;
+  if (tower.tutorialDeployment && state.currentWave?.kind === 'tutorial') {
+    state.towers = state.towers.filter((candidate) => candidate.id !== towerId);
+    state.operatorQueue.push({
+      id: nextId(state, 'operator'),
+      operatorId: tower.typeId,
+      source: 'tutorial',
+    });
+    cancelSelection(state);
+    addLog(state, `收回教學部署 ${OPERATORS[tower.typeId].name}`, 'success');
+    notify(state, '教學砲台已收回；牌已放回工房，可重新部署。', 'neutral');
+    return true;
   }
   const refund = Math.floor(
     OPERATORS[tower.typeId].cost * ECONOMY.towerRecycleRefundFraction,
@@ -1864,6 +1906,14 @@ export function discardArsenalItem(state, itemId) {
   const operator = OPERATORS[item.operatorId];
   if (operator.kind !== 'tower') {
     notify(state, '捲軸是無限供應，不需要丟棄。', 'neutral');
+    return false;
+  }
+  const requiredForTutorial = state.phase === 'preparing'
+    && tutorialDeploymentProgress(state).goals.some((goal) => (
+      !goal.complete && goal.typeId === item.operatorId
+    ));
+  if (requiredForTutorial) {
+    notify(state, `${operator.name}是目前的教學指定牌，請點擊或拖曳它完成部署。`, 'danger');
     return false;
   }
   state.operatorQueue = state.operatorQueue.filter((candidate) => candidate.id !== itemId);

@@ -75,7 +75,6 @@ export const GAMEPLAY_CONFIG = deepFreeze({
       defaultHp: 120,
       durableHp: 150,
       defaultInitialCooldownSeconds: 0.25,
-      presetInitialCooldownSeconds: 0.25,
       targetRearTolerance: 0.035,
       blockerForwardTolerance: 0.014,
       blockingDistance: 0.065,

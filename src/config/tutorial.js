@@ -85,7 +85,7 @@ const tutorial = (config) => ({
   starterOperators: [...config.starterOperators],
   starterFormulaIds: [...config.starterFormulaIds],
   starterConstants: [...config.starterConstants],
-  presetTowers: config.presetTowers.map((tower) => ({ ...tower })),
+  deploymentGoals: config.deploymentGoals.map((goal) => ({ ...goal })),
   entries: config.entries.map((enemy) => ({ ...enemy })),
 });
 
@@ -95,7 +95,7 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     enemyGuideIds: ['constant'],
     starterOperators: ['add', 'subtract'],
     starterFormulaIds: ['identityK', 'identityK', 'identityK'], starterConstants: [2, 3, 4],
-    presetTowers: [],
+    deploymentGoals: [],
     entries: [
       entry('constant', 0, 0, () => p(term(2))),
       entry('constant', 1, 3.5, () => p(term(-3))),
@@ -107,9 +107,9 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     enemyGuideIds: ['higherOrder', 'polynomial'],
     starterOperators: ['secondDerivative', 'secondDerivative', 'integral', 'integral', 'derivative', 'derivative', 'subtract', 'subtract'],
     starterFormulaIds: ['identityK', 'doubleK', 'negateK'], starterConstants: [0, 1, 2],
-    presetTowers: [
-      { typeId: 'secondDerivative', row: 0, column: 1 },
-      { typeId: 'derivative', row: 1, column: 1 },
+    deploymentGoals: [
+      { typeId: 'secondDerivative', row: 0 },
+      { typeId: 'derivative', row: 1 },
     ],
     entries: [
       entry('higherOrder', 0, 0, () => p(term(1, 4))),
@@ -122,8 +122,8 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     enemyGuideIds: ['rational', 'polynomial'],
     starterOperators: ['eulerTower', 'eulerTower', 'limit', 'limit', 'derivative', 'derivative', 'secondDerivative', 'integral'],
     starterFormulaIds: ['identityK', 'identityK', 'kSquared'], starterConstants: [1, 1, 2],
-    presetTowers: [
-      { typeId: 'derivative', row: 1, column: 1 },
+    deploymentGoals: [
+      { typeId: 'derivative', row: 1 },
     ],
     entries: [
       entry('rational', 0, 0, () => p(term(1, -1))),
@@ -136,8 +136,8 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     enemyGuideIds: ['logarithmic', 'rational', 'multivariable'],
     starterOperators: ['derivative', 'eulerTower', 'eulerTower', 'secondDerivative', 'evaluateTower', 'partial', 'derivative', 'secondDerivative'],
     starterFormulaIds: ['identityK', 'identityK', 'identityK'], starterConstants: [1, 1, 2],
-    presetTowers: [
-      { typeId: 'secondDerivative', row: 2, column: 1 },
+    deploymentGoals: [
+      { typeId: 'secondDerivative', row: 2 },
     ],
     entries: [
       entry('logarithmic', 0, 0, () => logarithm(1)),
@@ -150,7 +150,7 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     enemyGuideIds: ['trigonometric'],
     starterOperators: ['resonanceTower', 'resonanceTower', 'resonanceTower', 'definiteIntegralTower', 'derivative', 'secondDerivative', 'limit', 'integral'],
     starterFormulaIds: ['kSquared', 'kSquared', 'kSquared'], starterConstants: [1, 2, 2],
-    presetTowers: [],
+    deploymentGoals: [],
     entries: [
       entry('trigonometric', 0, 0, () => trigonometric('sin', 1, 1)),
       entry('trigonometric', 1, 4.5, () => trigonometric('cos', 2, 1)),
@@ -168,7 +168,7 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     enemyGuideIds: ['trigonometric', 'exponential'],
     starterOperators: ['resonanceTower', 'resonanceTower', 'reflect', 'limit', 'reflect', 'limit', 'secondDerivative', 'derivative'],
     starterFormulaIds: ['negSquareK', 'negSquareK', 'kSquared'], starterConstants: [1, 2, 1],
-    presetTowers: [],
+    deploymentGoals: [],
     entries: [
       entry('exponential', 0, 0, () => exponential(1, 1)),
       entry('exponential', 1, 4.5, () => exponential(-2, 1)),

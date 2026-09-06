@@ -159,6 +159,27 @@
   box-shadow: 0 0 0 2px var(--brass), 0 0 22px rgba(229, 169, 77, 0.72), inset 0 0 24px rgba(229, 169, 77, 0.1);
 }
 
+.operator-card.is-tutorial-goal {
+  border-color: var(--mint);
+  outline-color: rgba(127, 211, 179, 0.72);
+  box-shadow: 0 0 0 2px rgba(127, 211, 179, 0.62), 0 0 24px rgba(127, 211, 179, 0.7), inset 0 0 24px rgba(127, 211, 179, 0.16);
+}
+
+.tutorial-action-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  left: 3px;
+  z-index: 3;
+  padding: 2px 3px;
+  border-radius: 8px;
+  background: rgba(2, 17, 19, 0.94);
+  color: var(--mint);
+  font: 800 clamp(6px, 0.48cqw, 8px) / 1.1 var(--font-ui);
+  letter-spacing: 0;
+  pointer-events: none;
+}
+
 .operator-card.is-constant-drop-target {
   border-color: rgba(127, 211, 179, 0.82);
   box-shadow: 0 0 14px rgba(127, 211, 179, 0.36), inset 0 0 20px rgba(127, 211, 179, 0.12);

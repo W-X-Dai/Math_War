@@ -3,6 +3,7 @@ import { computed } from 'vue';
 
 import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
 import { OPERATORS } from '../game/content.js';
+import { tutorialDeploymentProgress } from '../game/engine.js';
 import GameIcon from './GameIcon.vue';
 
 const props = defineProps({
@@ -15,8 +16,12 @@ const isTutorialWave = computed(() => props.state.currentWave?.kind === 'tutoria
 const tutorialsRead = computed(() => (
   !(props.state.enemyTutorialQueue?.length) && !(props.state.weaponTutorialQueue?.length)
 ));
+const tutorialDeployment = computed(() => tutorialDeploymentProgress(props.state));
 const canStart = computed(() => (
-  props.state.phase === 'preparing' && !props.state.paused && tutorialsRead.value
+  props.state.phase === 'preparing'
+  && !props.state.paused
+  && tutorialsRead.value
+  && tutorialDeployment.value.complete
 ));
 const remainingSeconds = computed(() => Math.max(0, Math.ceil(props.state.prepRemaining)));
 const awardsEarlyStart = computed(() => (
@@ -165,13 +170,16 @@ const guaranteedSupply = computed(() => {
     <template v-if="state.phase === 'preparing'">
       <section class="prep-status" aria-live="polite">
         <div class="prep-clock">
-          <span>{{ isTutorialWave ? '教學整備' : '整備倒數' }}</span>
-          <strong data-bind="prepRemaining">{{ remainingSeconds }}<small>s</small></strong>
+          <span>{{ isTutorialWave && !tutorialDeployment.complete ? '等待你部署' : (isTutorialWave ? '教學整備' : '整備倒數') }}</span>
+          <strong v-if="isTutorialWave && !tutorialDeployment.complete" data-bind="tutorialDeploymentProgress">
+            {{ tutorialDeployment.completed }}/{{ tutorialDeployment.total }}<small>座</small>
+          </strong>
+          <strong v-else data-bind="prepRemaining">{{ remainingSeconds }}<small>s</small></strong>
         </div>
         <div v-if="isTutorialWave" class="wave-intel tutorial-wave-intel" data-bind="waveSummary">
           <span v-if="segmentLabel" class="segment-badge">{{ segmentLabel }}</span>
           <span class="tutorial-wave-badge">固定教學波</span>
-          <span class="tutorial-objective">目標：{{ state.currentWave?.objective ?? '觀察新敵人，使用預置軍械將公式化為 0。' }}</span>
+          <span class="tutorial-objective">目標：{{ state.currentWave?.objective ?? '觀察新敵人，親自操作軍械將公式化為 0。' }}</span>
           <span><b>{{ summary.total ?? state.currentWave?.entries?.length ?? 0 }}</b> 隻固定敵人</span>
         </div>
         <div v-else class="wave-intel wave-intel--detailed" data-bind="waveSummary">
@@ -196,8 +204,8 @@ const guaranteedSupply = computed(() => {
           </ol>
         </div>
         <div v-if="isTutorialWave" class="early-bonus tutorial-loadout">
-          <span>本波配置</span>
-          <strong>教學預置</strong>
+          <span>{{ tutorialDeployment.total ? '互動部署' : '本波操作' }}</span>
+          <strong>{{ tutorialDeployment.total ? `${tutorialDeployment.completed} / ${tutorialDeployment.total} 座` : '由你完成' }}</strong>
         </div>
         <div v-else-if="awardsEarlyStart" class="early-bonus">
           <span>提早部署獎勵</span>
@@ -209,7 +217,7 @@ const guaranteedSupply = computed(() => {
         </div>
       </section>
     </template>
-    <p v-else data-bind="waveHint">{{ isTutorialWave ? `教學目標：${state.currentWave?.objective ?? '觀察新敵人，使用預置軍械將公式化為 0。'}` : (state.currentWave?.hint ?? '觀察函數族與變異，選擇正確的算子。') }}</p>
+    <p v-else data-bind="waveHint">{{ isTutorialWave ? `教學目標：${state.currentWave?.objective ?? '觀察新敵人，親自操作軍械將公式化為 0。'}` : (state.currentWave?.hint ?? '觀察函數族與變異，選擇正確的算子。') }}</p>
     <button
       class="primary-button"
       type="button"

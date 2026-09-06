@@ -50,6 +50,7 @@ export function generateTutorialWave(chapterIndex) {
     segmentKind: 'recognition',
     endlessRound: 0,
     awardsEarlyStart: false,
+    deploymentGoals: config.deploymentGoals.map((goal) => ({ ...goal })),
     entries,
     requiredTags: families,
     summary: {

@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import { OPERATORS, OPERATOR_QUEUE_CAPACITY, OPERATOR_QUEUE_INTERVAL } from '../game/content.js';
+import { tutorialDeploymentProgress } from '../game/engine.js';
 import { formatValue } from '../ui/format.js';
 import {
   addLabel,
@@ -50,6 +51,8 @@ const libraries = computed(() => [
   },
 ].filter((library) => library.id !== 'tower-queue' || hasTowerSupply.value));
 const queueFull = computed(() => towerCards.value.length >= OPERATOR_QUEUE_CAPACITY);
+const tutorialDeployment = computed(() => tutorialDeploymentProgress(props.state));
+const pendingDeploymentGoal = computed(() => tutorialDeployment.value.next);
 const refillProgress = computed(() => {
   if (queueFull.value) return 100;
   return Math.max(0, Math.min(100, ((OPERATOR_QUEUE_INTERVAL - props.state.operatorCooldown) / OPERATOR_QUEUE_INTERVAL) * 100));
@@ -57,6 +60,17 @@ const refillProgress = computed(() => {
 const selectionHint = computed(() => {
   const item = cards.value.find((candidate) => candidate.id === props.state.selectedOperatorItemId);
   const operator = item ? OPERATORS[item.operatorId] : null;
+  if (
+    pendingDeploymentGoal.value
+    && operator?.kind === 'tower'
+    && operator.id === pendingDeploymentGoal.value.typeId
+  ) {
+    return `教學步驟 2：點擊第 ${pendingDeploymentGoal.value.row + 1} 路發亮格子完成部署`;
+  }
+  if (pendingDeploymentGoal.value) {
+    const goalOperator = OPERATORS[pendingDeploymentGoal.value.typeId];
+    return `教學步驟 1：點擊或拖曳「${goalOperator?.name ?? '指定砲台'}」到第 ${pendingDeploymentGoal.value.row + 1} 路`;
+  }
   if (operator?.kind === 'tower') return `${operator.name}：點擊發亮格子部署`;
   if (props.state.targetingOperator) return `${cardSymbol(item)}：點擊一隻敵人`;
   if (props.state.partialConfirmOpen) return '確認全場算式變化後施放';
@@ -101,6 +115,10 @@ function resourceGlyph(item) {
 function isSelected(item) {
   return props.state.selectedOperatorItemId === item.id;
 }
+
+function isTutorialGoal(item) {
+  return item.operatorId === pendingDeploymentGoal.value?.typeId;
+}
 </script>
 
 <template>
@@ -122,6 +140,7 @@ function isSelected(item) {
             :data-parameter-ready="item.operator.parameterKeys?.length ? String(parameterScrollReady(item)) : undefined"
             :data-drag-kind="canDragToBattlefield(item) ? 'arsenal' : undefined"
             :data-drag-id="canDragToBattlefield(item) ? item.id : undefined"
+            :data-tutorial-goal="isTutorialGoal(item) ? 'true' : undefined"
             :draggable="canDragToBattlefield(item)"
             :aria-keyshortcuts="item.operator.kind === 'tower' ? 'Delete' : undefined"
             :class="{
@@ -132,18 +151,20 @@ function isSelected(item) {
               'is-scroll-ready': parameterScrollReady(item),
               'is-unaffordable': state.energy < item.operator.cost,
               'is-selected': isSelected(item),
+              'is-tutorial-goal': isTutorialGoal(item),
               'is-dragging': dragPayload?.kind === 'arsenal' && dragPayload.id === item.id,
               'is-constant-drop-target': ['stored-constant', 'numeric-constant'].includes(dragPayload?.kind) && Boolean(item.operator.parameterKeys?.length) && !parameterScrollReady(item),
               'is-drop-over': dragOverItemId === item.id,
             }"
             type="button"
             :aria-pressed="isSelected(item)"
-            :aria-label="`${item.operator.name}，${resourceGlyph(item)}，算力 ${item.operator.cost}`"
+            :aria-label="`${item.operator.name}，${resourceGlyph(item)}，算力 ${item.operator.cost}${isTutorialGoal(item) ? `，教學下一步：點擊後放到第 ${pendingDeploymentGoal.row + 1} 路，或直接拖曳` : ''}`"
             :title="item.operator.description"
             @click="$emit('select', item.id)"
           >
             <span v-if="item.operator.kind === 'tower'" class="operator-key">{{ item.index + 1 }}</span>
             <span v-if="item.source === 'guaranteed'" class="guaranteed-card-badge">保障</span>
+            <span v-if="isTutorialGoal(item)" class="tutorial-action-badge">點我或拖曳</span>
             <span class="resource-glyph" aria-hidden="true">{{ resourceGlyph(item) }}</span>
             <span class="operator-cost operator-cost--compact">Σ {{ item.operator.cost }}</span>
           </button>

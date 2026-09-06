@@ -155,7 +155,7 @@ const actions = {
   },
   tower: (towerId) => {
     const tower = game.towers.find((candidate) => candidate.id === towerId);
-    if (!tower || tower.tutorialPreset) return false;
+    if (!tower) return false;
     if (recycleArmed.value) {
       const changed = act(() => recycleTower(game, towerId), 'success');
       recycleArmed.value = false;
