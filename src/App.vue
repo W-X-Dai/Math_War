@@ -1,7 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 
-import { GAMEPLAY_CONFIG } from './config/gameplay.js';
 import { PRESENTATION_CONFIG } from './config/presentation.js';
 import {
   advanceEnemyTutorial,
@@ -14,7 +13,6 @@ import {
   discardConstantItem,
   discardFormulaItem,
   discardStoredConstant,
-  installAssembly,
   placeTower,
   prepareAssembly,
   recycleTower,
@@ -52,10 +50,6 @@ let animationFrame = 0;
 let previousTime = 0;
 
 const { audio } = PRESENTATION_CONFIG;
-const configurableTowerIds = [
-  ...GAMEPLAY_CONFIG.combat.tower.configurableTypeIds,
-  GAMEPLAY_CONFIG.combat.tower.boundedTypeId,
-];
 const trashDiscardKinds = new Set(['arsenal', 'formula', 'constant', 'stored-constant']);
 
 function tone(kind = 'select') {
@@ -166,9 +160,6 @@ const actions = {
       recycleArmed.value = false;
       dragOverTowerId.value = null;
       return changed;
-    }
-    if (game.selectedStoredConstantId !== null && configurableTowerIds.includes(tower?.typeId)) {
-      return act(() => installAssembly(game, towerId), 'success');
     }
     return false;
   },

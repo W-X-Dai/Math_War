@@ -8,6 +8,7 @@ import {
   multiplyByX,
   normalizeExpression,
   scaleExpression,
+  substituteX,
 } from '../src/domain/expression.js';
 import { CHAPTERS, FORMULA_CARDS, OPERATORS } from '../src/game/content.js';
 import {
@@ -32,6 +33,7 @@ function applyOperator(expression, operator) {
   switch (operator.operatorId) {
     case 'derivative': return differentiate(expression);
     case 'secondDerivative': return differentiate(expression, 'x', 2);
+    case 'evaluateTower': return substituteX(expression, operator.parameter);
     case 'eulerTower': return addExpressions(
       multiplyByX(differentiate(expression)),
       scaleExpression(expression, operator.parameter),
@@ -59,19 +61,32 @@ function assertSorted(entries) {
 }
 
 function assertSupplyCovers(wave, chapter) {
+  const towerRows = new Set();
   const expectedOperators = wave.counterRequirements.flatMap((requirement) => (
-    requirement.operators.map((operator) => operator.operatorId)
+    requirement.operators.flatMap((operator) => {
+      if (!OPERATORS[operator.operatorId].parameterKeys?.length) {
+        const key = `${requirement.row}:${operator.operatorId}`;
+        if (towerRows.has(key)) return [];
+        towerRows.add(key);
+        return [operator.operatorId];
+      }
+      return Array.from({ length: requirement.scrollUses }, () => operator.operatorId);
+    })
   ));
   assert.deepEqual(wave.guaranteedSupply.operators, expectedOperators);
-  const parameterOperators = wave.counterRequirements.flatMap((requirement) => (
-    requirement.operators.filter((operator) => operator.parameter != null)
+  const expectedParameters = wave.counterRequirements.flatMap((requirement) => (
+    requirement.operators.flatMap((operator) => (
+      operator.parameter == null
+        ? []
+        : Array.from({ length: requirement.scrollUses }, () => operator.parameter)
+    ))
   ));
-  assert.equal(wave.guaranteedSupply.formulaIds.length, parameterOperators.length);
-  assert.equal(wave.guaranteedSupply.constants.length, parameterOperators.length);
-  parameterOperators.forEach((operator, index) => {
+  assert.equal(wave.guaranteedSupply.formulaIds.length, expectedParameters.length);
+  assert.equal(wave.guaranteedSupply.constants.length, expectedParameters.length);
+  expectedParameters.forEach((parameter, index) => {
     const card = FORMULA_CARDS.find((candidate) => candidate.id === wave.guaranteedSupply.formulaIds[index]);
     assert.ok(card);
-    assert.equal(card.evaluate({ k: wave.guaranteedSupply.constants[index] }), operator.parameter);
+    assert.equal(card.evaluate({ k: wave.guaranteedSupply.constants[index] }), parameter);
   });
   const cost = expectedOperators.reduce((total, id) => total + OPERATORS[id].cost, 0);
   assert.ok(cost <= chapter.startingEnergy, `guaranteed defense costs ${cost}/${chapter.startingEnergy}`);
@@ -266,13 +281,25 @@ test('endless ordinary enemies stay finite-legal and mixed frequency is a warned
         assert.ok(RATE_SET.has(expression.exponentials[0].rate));
       }
     }
+    const specialistEntries = wave.entries.filter((entry) => (
+      ['rational', 'logarithmic', 'trigonometric', 'exponential'].includes(entry.family)
+    ));
+    assert.equal(wave.counterRequirements.length, specialistEntries.length);
+    assertSupplyCovers(wave, { startingEnergy: Number.POSITIVE_INFINITY });
+    for (const requirement of wave.counterRequirements) {
+      const entry = wave.entries.find((candidate) => candidate.id === requirement.entryId);
+      assert.ok(entry);
+      assert.ok(counterEliminates(entry.expression, requirement));
+      assert.equal(
+        requirement.scrollUses,
+        1 + (entry.affixes.includes('shield') ? 1 : 0) + entry.splitExpressions.length,
+      );
+    }
     if (roundNumber >= 10) {
-      assert.equal(wave.counterRequirements.length, 1);
-      assert.match(wave.counterRequirements[0].warning, /混頻/);
-      assert.equal(wave.guaranteedSupply.operators.length, 2);
+      const eliteRequirement = wave.counterRequirements.find((requirement) => requirement.warning);
+      assert.ok(eliteRequirement);
+      assert.match(eliteRequirement.warning, /混頻/);
       assert.ok(wave.summary.lanes.some((lane) => lane.mixedFrequencyElite));
-    } else {
-      assert.deepEqual(wave.counterRequirements, []);
     }
   }
 });

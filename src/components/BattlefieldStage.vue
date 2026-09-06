@@ -1,7 +1,6 @@
 <script setup>
 import { computed } from 'vue';
 
-import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
 import { PRESENTATION_CONFIG } from '../config/presentation.js';
 import { formatExpression } from '../domain/expression.js';
 import { CHAPTERS, ENEMY_TYPES, OPERATORS } from '../game/content.js';
@@ -11,12 +10,14 @@ import {
   enemyCardPlacement,
   enemyFormulaClasses,
 } from '../ui/enemy-card.js';
-import { prettyFormula } from '../ui/format.js';
+import { formatValue, prettyFormula } from '../ui/format.js';
 import {
   isProjectileEffect,
+  identityTerm,
   projectileLabel,
   projectileVisualGeometry,
   resolveProjectileTargetLayouts,
+  subtractLabel,
 } from '../ui/projectile.js';
 import GameIcon from './GameIcon.vue';
 
@@ -30,7 +31,6 @@ const props = defineProps({
 defineEmits(['place-tower', 'enemy', 'tower', 'cancel', 'dismiss-tutorial']);
 
 const { battlefield, enemyCard } = PRESENTATION_CONFIG;
-const { tower: towerConfig } = GAMEPLAY_CONFIG.combat;
 const board = computed(() => props.state.board ?? battlefield.fallbackBoard);
 const boardStyle = computed(() => {
   const gameSpeed = Math.max(battlefield.minimumGameSpeed, Number(props.state.speed) || 1);
@@ -47,8 +47,8 @@ const cells = computed(() => Array.from({ length: board.value.rows * board.value
   placement: index % board.value.columns < board.value.placeableColumns,
 })));
 
-const selectedStoredConstant = computed(() => (
-  props.state.storedConstants?.find((item) => item.id === props.state.selectedStoredConstantId) ?? null
+const targetingItem = computed(() => (
+  props.state.operatorQueue?.find((item) => item.id === props.state.selectedOperatorItemId) ?? null
 ));
 const recycleTargeting = computed(() => (
   props.recycleArmed || props.dragPayload?.kind === 'recycle-tool'
@@ -145,44 +145,15 @@ function occupied(row, column) {
   return props.state.towers.some((tower) => tower.row === row && tower.column === column);
 }
 
-function towerConfigurable(tower) {
-  return tower.typeId === towerConfig.boundedTypeId
-    || towerConfig.configurableTypeIds.includes(tower.typeId);
-}
-
-function towerFilled(tower) {
-  if (tower.typeId === towerConfig.boundedTypeId) {
-    return tower.lowerBound !== null && tower.upperBound !== null;
-  }
-  if (towerConfig.configurableTypeIds.includes(tower.typeId)) return tower.parameter !== null;
-  return true;
-}
-
-function towerSlot(tower) {
-  if (tower.typeId === 'subtract') return tower.parameter === null ? 'x−[ ]' : `x−${tower.parameter}`;
-  if (tower.typeId === 'definiteIntegralTower') return `∫ ${tower.lowerBound ?? '[ ]'}→${tower.upperBound ?? '[ ]'}`;
-  if (tower.typeId === 'evaluateTower') return `f(${tower.parameter ?? '[ ]'})`;
-  if (tower.typeId === 'eulerTower') return `xD+${tower.parameter ?? '[ ]'}I`;
-  if (tower.typeId === 'resonanceTower') return `D²+${tower.parameter ?? '[ ]'}I`;
-  return '';
-}
-
 function towerLabel(tower) {
   if (tower.tutorialPreset) {
     return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，教學預置且已鎖定，不可回收，耐久 ${Math.max(0, Math.ceil(tower.hp))}`;
   }
-  const configurable = towerConfigurable(tower);
   let interaction = '運作中；按 Delete 可回收並取回一半算力';
   if (recycleTargeting.value) {
     interaction = '點擊回收並取回一半算力';
-  } else if (selectedStoredConstant.value && configurable) {
-    interaction = tower.active
-      ? `點擊裝入常數 ${selectedStoredConstant.value.value}`
-      : `運算錯誤停火；點擊重新裝填常數 ${selectedStoredConstant.value.value}`;
   } else if (!tower.active) {
-    interaction = configurable
-      ? '運算錯誤停火；請選擇常數並重新裝填'
-      : '運算錯誤停火';
+    interaction = '運算錯誤停火';
   }
   return `${OPERATORS[tower.typeId]?.name ?? '數學砲台'}，耐久 ${Math.max(0, Math.ceil(tower.hp))}，${interaction}`;
 }
@@ -237,6 +208,18 @@ function enemyTitle(enemyItem) {
   return `護盾 ${formulaText(enemyItem.shieldExpression)}｜本體 ${body}`;
 }
 
+function targetingLabel() {
+  const item = targetingItem.value;
+  if (!item) return OPERATORS[props.state.targetingOperator]?.name ?? '單體算子';
+  const value = (key) => formatValue(item[key]);
+  if (item.operatorId === 'subtract') return `P(x)${subtractLabel(item.parameter)}`;
+  if (item.operatorId === 'definiteIntegralTower') return `∫[${value('lowerBound')}, ${value('upperBound')}]`;
+  if (item.operatorId === 'evaluateTower') return `f(${value('parameter')})`;
+  if (item.operatorId === 'eulerTower') return `xD${identityTerm(item.parameter)}`;
+  if (item.operatorId === 'resonanceTower') return `D²${identityTerm(item.parameter)}`;
+  return OPERATORS[item.operatorId]?.name ?? '單體算子';
+}
+
 function enemyLabel(enemyItem) {
   const body = formulaText(enemyItem.expression);
   const mutations = [
@@ -245,7 +228,7 @@ function enemyLabel(enemyItem) {
   ].filter(Boolean);
   const mutationText = mutations.length ? `，${mutations.join('、')}` : '';
   const action = props.state.targetingOperator
-    ? `點擊施作 ${OPERATORS[props.state.targetingOperator]?.name ?? '算子'}`
+    ? `點擊施作 ${targetingLabel()}`
     : '點擊查看公式';
   if (enemyItem.shieldExpression) {
     return `${enemyType(enemyItem).name}，${familyLabel(enemyItem)}${mutationText}，等式護盾 ${formulaText(enemyItem.shieldExpression)}，護盾後方本體 ${body}，本體攻擊 ${enemyThreat(enemyItem)}，${action}`;
@@ -356,9 +339,6 @@ function effectStyle(effect) {
           :class="{
             'is-firing': tower.fireFlash > 0,
             'is-error-stopped': !tower.active,
-            'is-configurable': towerConfigurable(tower),
-            'is-filled': towerConfigurable(tower) && towerFilled(tower),
-            'is-awaiting-assembly': !recycleTargeting && !tower.tutorialPreset && towerConfigurable(tower) && Boolean(selectedStoredConstant),
             'is-recycle-target': recycleTargeting && !tower.tutorialPreset,
             'is-recycle-over': dragOverTowerId === tower.id,
             'is-tutorial-preset': tower.tutorialPreset,
@@ -372,7 +352,6 @@ function effectStyle(effect) {
           @click="!tower.tutorialPreset && $emit('tower', tower.id)"
         >
           <span class="tower-sprite" :class="OPERATORS[tower.typeId].art" aria-hidden="true"></span>
-          <span class="tower-slot" aria-hidden="true">{{ towerSlot(tower) }}</span>
           <span v-if="tower.tutorialPreset" class="tutorial-preset-badge" aria-hidden="true">教學預置</span>
           <span v-else-if="!tower.active" class="tower-error-badge" aria-hidden="true">
             <b>運算錯誤停火</b><small>重新裝填</small>
@@ -381,13 +360,7 @@ function effectStyle(effect) {
         </button>
       </div>
 
-      <TransitionGroup
-        tag="div"
-        class="enemy-layer"
-        data-layer="enemies"
-        leave-active-class="enemy-leave-active"
-        leave-to-class="is-vanishing"
-      >
+      <div class="enemy-layer" data-layer="enemies">
         <button
           v-for="enemyItem in state.enemies"
           :key="enemyItem.id"
@@ -397,6 +370,8 @@ function effectStyle(effect) {
           :data-stack-slot="enemyPresentation.get(enemyItem.id)?.slot ?? 0"
           :data-cluster-size="enemyPresentation.get(enemyItem.id)?.clusterSize ?? 1"
           :data-shield-active="enemyItem.shieldExpression ? 'true' : 'false'"
+          :data-row="enemyItem.row"
+          :data-position="enemyItem.position"
           :data-body-expression="formulaText(enemyItem.expression)"
           :data-active-expression="formulaText(activeEnemyExpression(enemyItem))"
           :class="{
@@ -432,7 +407,7 @@ function effectStyle(effect) {
             </span>
           </span>
         </button>
-      </TransitionGroup>
+      </div>
 
       <div class="effect-layer" data-layer="effects" aria-hidden="true">
         <span
@@ -440,8 +415,13 @@ function effectStyle(effect) {
           :key="effect.id"
           :class="effectClass(effect)"
           :style="effectStyle(effect)"
+          :data-effect-id="effect.id"
           :data-operator="effect.operatorId"
           :data-status="effect.status"
+          :data-trajectory="effect.trajectory"
+          :data-target-id="effect.targetId"
+          :data-impact-target-id="effect.impactTargetId"
+          :data-projectile-position="effect.currentPosition"
           :data-equation="effect.equation ? prettyFormula(effect.equation) : undefined"
         >
           <template v-if="isProjectileEffect(effect)">
@@ -457,7 +437,7 @@ function effectStyle(effect) {
 
       <div class="targeting-mode" data-bind="targeting" :hidden="!state.targetingOperator">
         <template v-if="state.targetingOperator">
-          <span>{{ OPERATORS[state.targetingOperator]?.name ?? '單體算子' }}：選一隻敵人</span>
+          <span>{{ targetingLabel() }}：選一隻敵人</span>
           <button type="button" data-action="cancel" @click="$emit('cancel')">取消</button>
         </template>
       </div>

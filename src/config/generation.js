@@ -102,14 +102,14 @@ export const GENERATION_CONFIG = deepFreeze({
       },
       {
         pressure: [
-          { family: 'logarithmic', powerRange: [0, 0], counter: { operatorIds: ['derivative', 'eulerTower'], parameters: [null, 1] } },
+          { family: 'logarithmic', powerRange: [0, 0], counter: { operatorIds: ['evaluateTower'], parameters: [1] } },
           { family: 'rational', powerRange: [-1, -1], parameter: 1, counter: { operatorIds: ['eulerTower'], parameters: [1] } },
           { family: 'rational', powerRange: [-2, -2], parameter: 2, counter: { operatorIds: ['eulerTower'], parameters: [2] } },
           { family: 'higherOrder', powerRange: [3, 5], counter: { operatorIds: ['secondDerivative'] } },
           { family: 'higherOrder', powerRange: [3, 5], counter: { operatorIds: ['secondDerivative'] } },
         ],
         mixed: [
-          { family: 'logarithmic', powerRange: [0, 0], counter: { operatorIds: ['derivative', 'eulerTower'], parameters: [null, 1] } },
+          { family: 'logarithmic', powerRange: [0, 0], counter: { operatorIds: ['evaluateTower'], parameters: [1] } },
           { family: 'rational', powerRange: [-1, -1], parameter: 1, possibleAffixes: ['shield'], counter: { operatorIds: ['eulerTower'], parameters: [1] } },
           { family: 'rational', powerRange: [-2, -2], parameter: 2, counter: { operatorIds: ['eulerTower'], parameters: [2] } },
           { family: 'higherOrder', powerRange: [3, 5], possibleAffixes: ['shield'], counter: { operatorIds: ['secondDerivative'] } },

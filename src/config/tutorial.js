@@ -49,7 +49,7 @@ export const ENEMY_GUIDES = deepFreeze({
   logarithmic: {
     id: 'logarithmic', label: '對數', name: '對數捲獸', art: 'enemy-art-brute', sample: 'ln|x|',
     description: '對數在無窮遠會發散，但微分一次會變成可以取極限的 1/x。',
-    clue: '先 D，再 lim∞；Euler 塔裝入 0 也能把它化為常數。',
+    clue: '刻寫 f(1) 可直接利用 ln|1|=0，避免自動砲台連續改寫目標。',
   },
   'affix-split': {
     id: 'affix-split', label: '變異・分裂', name: '分裂徽章', art: 'enemy-art-brute', sample: '歸零後分成兩項',
@@ -121,12 +121,11 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     ],
   }),
   tutorial({
-    id: 'asymptotic-recognition', objective: '確認 D 無法消去 x⁻¹，再用參數 1 的 Euler 塔持續反制。',
+    id: 'asymptotic-recognition', objective: '確認 D 無法消去 x⁻¹，為兩隻分式各刻寫一張參數 1 的 Euler 捲軸。',
     enemyGuideIds: ['rational', 'polynomial'],
     starterOperators: ['eulerTower', 'eulerTower', 'limit', 'limit', 'derivative', 'derivative', 'secondDerivative', 'integral'],
     starterFormulaIds: ['identityK', 'identityK', 'kSquared'], starterConstants: [1, 1, 2],
     presetTowers: [
-      { typeId: 'eulerTower', row: 0, column: 1, parameter: 1 },
       { typeId: 'derivative', row: 1, column: 1 },
     ],
     entries: [
@@ -136,14 +135,11 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     ],
   }),
   tutorial({
-    id: 'composition-recognition', objective: '練習先 D 後 Euler 的兩步塔序，並把多變數視為相同 x 次方的閱讀變體。',
+    id: 'composition-recognition', objective: '練習用 f(1) 直接消去對數、用 Euler 捲軸消去分式，並以 D² 處理多變數。',
     enemyGuideIds: ['logarithmic', 'rational', 'multivariable'],
     starterOperators: ['derivative', 'eulerTower', 'eulerTower', 'secondDerivative', 'evaluateTower', 'partial', 'derivative', 'secondDerivative'],
     starterFormulaIds: ['identityK', 'identityK', 'identityK'], starterConstants: [1, 1, 2],
     presetTowers: [
-      { typeId: 'derivative', row: 0, column: 2 },
-      { typeId: 'eulerTower', row: 0, column: 1, parameter: 1 },
-      { typeId: 'eulerTower', row: 1, column: 1, parameter: 2 },
       { typeId: 'secondDerivative', row: 2, column: 1 },
     ],
     entries: [
@@ -153,14 +149,11 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     ],
   }),
   tutorial({
-    id: 'periodic-recognition', objective: '辨認頻率 1 與 2，確認同頻 sin、cos 共用同一個正平方參數。',
+    id: 'periodic-recognition', objective: '辨認頻率 1 與 2，為每隻敵人刻寫對應的正平方共振捲軸。',
     enemyGuideIds: ['trigonometric'],
     starterOperators: ['resonanceTower', 'resonanceTower', 'resonanceTower', 'definiteIntegralTower', 'derivative', 'secondDerivative', 'limit', 'integral'],
     starterFormulaIds: ['kSquared', 'kSquared', 'kSquared'], starterConstants: [1, 2, 2],
-    presetTowers: [
-      { typeId: 'resonanceTower', row: 0, column: 1, parameter: 1 },
-      { typeId: 'resonanceTower', row: 1, column: 1, parameter: 4 },
-    ],
+    presetTowers: [],
     entries: [
       entry('trigonometric', 0, 0, () => trigonometric('sin', 1, 1)),
       entry('trigonometric', 1, 4.5, () => trigonometric('cos', 2, 1)),
@@ -174,15 +167,11 @@ export const CHAPTER_TUTORIALS = deepFreeze([
     ],
   }),
   tutorial({
-    id: 'exponential-recognition', objective: '分辨三角的正平方與指數的負平方參數；成長指數不能直接取極限。',
+    id: 'exponential-recognition', objective: '分辨三角的正平方與指數的負平方捲軸；成長指數不能直接取極限。',
     enemyGuideIds: ['trigonometric', 'exponential'],
     starterOperators: ['resonanceTower', 'resonanceTower', 'reflect', 'limit', 'reflect', 'limit', 'secondDerivative', 'derivative'],
     starterFormulaIds: ['negSquareK', 'negSquareK', 'kSquared'], starterConstants: [1, 2, 1],
-    presetTowers: [
-      { typeId: 'resonanceTower', row: 0, column: 1, parameter: -1 },
-      { typeId: 'resonanceTower', row: 1, column: 1, parameter: -4 },
-      { typeId: 'resonanceTower', row: 2, column: 1, parameter: 1 },
-    ],
+    presetTowers: [],
     entries: [
       entry('exponential', 0, 0, () => exponential(1, 1)),
       entry('exponential', 1, 4.5, () => exponential(-2, 1)),

@@ -1,7 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
 
-import { GAMEPLAY_CONFIG } from '../config/gameplay.js';
 import { OPERATORS } from '../game/content.js';
 import { partialPreview } from '../game/engine.js';
 import { ENEMY_GUIDES } from '../game/tutorial-content.js';
@@ -13,11 +12,6 @@ const props = defineProps({
 });
 
 const tutorialHeading = ref(null);
-const configurableTowerIds = [
-  ...GAMEPLAY_CONFIG.combat.tower.configurableTypeIds,
-  GAMEPLAY_CONFIG.combat.tower.boundedTypeId,
-];
-
 defineEmits([
   'cancel', 'confirm-partial', 'advance-enemy-tutorial', 'advance-weapon-tutorial',
   'pause', 'select-level',
@@ -46,6 +40,7 @@ const weaponTutorialAction = computed(() => {
 const weaponUsage = computed(() => {
   if (newWeapon.value?.kind === 'tower') return '持續型砲台';
   if (newWeapon.value?.kind === 'global') return '全場一次性武器';
+  if (newWeapon.value?.parameterKeys?.length) return '單體參數捲軸';
   return '單體一次性武器';
 });
 const counterLabels = computed(() => {
@@ -56,12 +51,14 @@ const counterLabels = computed(() => {
   return (newWeapon.value?.counterTags ?? []).map((tag) => labels[tag] ?? tag).join('、');
 });
 const weaponSteps = computed(() => {
-  if (configurableTowerIds.includes(newWeapon.value?.id)) {
+  if (newWeapon.value?.parameterKeys?.length) {
     return [
-      '先從軍械庫選牌，再點亮地圖空格部署。',
-      newWeapon.value.id === 'definiteIntegralTower'
-        ? '在工坊組出上下界，從常數庫依序各裝入一次。'
-        : '在工坊組出需要的數值，從常數庫選取後點塔裝入。',
+      '先在工坊組出需要的數值，並從常數庫選取。',
+      newWeapon.value.parameterKeys.length > 1
+        ? '點擊軍械 Queue 中的捲軸，依序刻寫下界與上界。'
+        : '點擊軍械 Queue 中的捲軸，把已選常數刻寫上去。',
+      '刻寫完成後再點捲軸，然後點選任意一隻敵人施放。',
+      '目標無效或算力不足時，捲軸不會消耗。',
     ];
   }
   if (newWeapon.value?.kind === 'tower') {

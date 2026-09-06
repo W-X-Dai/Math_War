@@ -525,7 +525,7 @@ function hasXSingularity(expression) {
  * Substitute a numeric x value while preserving every other free variable.
  *
  * This is intentionally different from evaluateAt(), whose numeric API also
- * needs a concrete y value. A tower labelled f(k) substitutes x=k; it must not
+ * needs a concrete y value. A scroll labelled f(k) substitutes x=k; it must not
  * silently assume y=0 and erase terms such as y^2.
  */
 export function substituteX(expression, x) {

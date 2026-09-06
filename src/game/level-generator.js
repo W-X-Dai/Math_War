@@ -9,7 +9,7 @@ import {
   trigonometric,
 } from '../domain/expression.js';
 import { GENERATION_CONFIG } from '../config/generation.js';
-import { CHAPTERS, ENDLESS_CHAPTER } from './content.js';
+import { CHAPTERS, ENDLESS_CHAPTER, OPERATORS } from './content.js';
 import { finiteEncounterSchedule, finiteLaneRoles } from './encounters.js';
 
 const UINT32_RANGE = 0x1_0000_0000;
@@ -130,11 +130,21 @@ function selectFiniteAffixes(rng, role) {
   return [pick(rng, choices)];
 }
 
-function counterRequirement(role) {
+function requiredScrollUses(entries) {
+  return entries.reduce((total, entry) => (
+    total
+    + 1
+    + (entry.affixes?.includes('shield') ? 1 : 0)
+    + (entry.splitExpressions?.length ?? 0)
+  ), 0);
+}
+
+function counterRequirement(role, entries = []) {
   const parameters = role.counter.parameters ?? [];
   return {
     row: role.row,
     family: role.family,
+    scrollUses: Math.max(1, requiredScrollUses(entries)),
     operators: role.counter.operatorIds.map((operatorId, index) => ({
       operatorId,
       ...(parameters[index] == null ? {} : { parameter: parameters[index] }),
@@ -154,13 +164,23 @@ function parameterMaterials(operatorId, parameter) {
 
 function guaranteeForRequirements(requirements) {
   const guaranteedSupply = { operators: [], formulaIds: [], constants: [] };
+  const guaranteedTowerRows = new Set();
   for (const requirement of requirements) {
     for (const operator of requirement.operators) {
-      guaranteedSupply.operators.push(operator.operatorId);
-      if (operator.parameter == null) continue;
-      const materials = parameterMaterials(operator.operatorId, operator.parameter);
-      guaranteedSupply.formulaIds.push(materials.formulaId);
-      guaranteedSupply.constants.push(materials.constant);
+      const definition = OPERATORS[operator.operatorId];
+      if (!definition?.parameterKeys?.length) {
+        const rowKey = `${requirement.row}:${operator.operatorId}`;
+        if (guaranteedTowerRows.has(rowKey)) continue;
+        guaranteedTowerRows.add(rowKey);
+      }
+      const copies = definition?.parameterKeys?.length ? (requirement.scrollUses ?? 1) : 1;
+      for (let copy = 0; copy < copies; copy += 1) {
+        guaranteedSupply.operators.push(operator.operatorId);
+        if (operator.parameter == null) continue;
+        const materials = parameterMaterials(operator.operatorId, operator.parameter);
+        guaranteedSupply.formulaIds.push(materials.formulaId);
+        guaranteedSupply.constants.push(materials.constant);
+      }
     }
   }
   return guaranteedSupply;
@@ -292,7 +312,10 @@ export function generateFiniteSegment(seed, chapterIndex, segmentIndex) {
   const entries = schedule.map((event, index) => finiteEntry(
     seed, streamName, index, event, rolesByRow.get(event.row), expressionRng, chapterIndex,
   ));
-  const counterRequirements = roles.map(counterRequirement);
+  const counterRequirements = roles.map((role) => counterRequirement(
+    role,
+    entries.filter((entry) => entry.row === role.row),
+  ));
   const wave = {
     id: `${chapter.id}-${segment.kind}`,
     kind: 'challenge',
@@ -439,6 +462,17 @@ function endlessCounterForEntry(entry) {
     const parameters = [...new Set(expression.trigTerms.map((term) => term.rate ** 2))];
     return parameters.map((parameter) => ({ operatorId: 'resonanceTower', parameter }));
   }
+  if (entry.family === 'exponential') {
+    const parameters = [...new Set(expression.exponentials.map((term) => -(term.rate ** 2)))];
+    return parameters.map((parameter) => ({ operatorId: 'resonanceTower', parameter }));
+  }
+  if (entry.family === 'rational') {
+    const parameters = [...new Set(expression.terms.map((term) => -term.xPower))];
+    return parameters.map((parameter) => ({ operatorId: 'eulerTower', parameter }));
+  }
+  if (entry.family === 'logarithmic') {
+    return [{ operatorId: 'evaluateTower', parameter: 1 }];
+  }
   return [];
 }
 
@@ -495,13 +529,20 @@ export function generateEndlessWave(seed, roundNumber) {
       ...(isMixedElite ? { eliteKind: 'mixed-frequency' } : {}),
     };
   });
-  const elite = entries.find((entry) => entry.eliteKind === 'mixed-frequency');
-  const counterRequirements = elite ? [{
-    row: elite.row,
-    family: elite.family,
-    warning: '混頻精英需要兩個已預告的共振參數',
-    operators: endlessCounterForEntry(elite),
-  }] : [];
+  const counterRequirements = entries.flatMap((entry) => {
+    const operators = endlessCounterForEntry(entry);
+    if (!operators.length) return [];
+    return [{
+      row: entry.row,
+      family: entry.family,
+      entryId: entry.id,
+      scrollUses: 1 + (entry.affixes.includes('shield') ? 1 : 0) + entry.splitExpressions.length,
+      ...(entry.eliteKind === 'mixed-frequency'
+        ? { warning: '混頻精英需要兩個已預告的共振參數' }
+        : {}),
+      operators,
+    }];
+  });
   const wave = {
     id: streamName,
     kind: 'endless',

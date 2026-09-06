@@ -19,16 +19,16 @@ function normalizedTargetLayout(layout) {
   });
 }
 
-function scalarLabel(value) {
+export function scalarLabel(value) {
   return value === null || value === undefined ? '[ ]' : formatValue(value);
 }
 
-function subtractLabel(value) {
+export function subtractLabel(value) {
   if (Number(value) < 0) return `+${formatValue(Math.abs(value))}`;
   return `−${scalarLabel(value)}`;
 }
 
-function identityTerm(value) {
+export function identityTerm(value) {
   if (value === null || value === undefined) return '+[ ]I';
   if (value === 0) return '';
   return value < 0 ? `−${formatValue(Math.abs(value))}I` : `+${formatValue(value)}I`;
@@ -44,16 +44,17 @@ export function projectileProgress(effect) {
 }
 
 /**
- * Calculate the projectile point and the portion of the target card fan-out
- * that it should inherit. Both axes ease from the unshifted launch point to
- * the displayed card, so the final visual point matches the target precisely.
+ * Calculate the projectile point. Falling shots progressively follow their
+ * target card's fan-out; lane shots stay on the physical lane until impact,
+ * when the hit pulse adopts the card's final layout.
  */
 export function projectileVisualGeometry(effect, laneY, targetLayout = EMPTY_TARGET_LAYOUT) {
+  const trajectory = effect?.trajectory ?? (effect?.type === 'drop-projectile' ? 'drop' : 'lane');
   const rawPosition = Number(effect?.position);
   const position = effect?.position !== null
     && effect?.position !== undefined
     && Number.isFinite(rawPosition)
-    ? clampUnit(rawPosition)
+    ? (trajectory === 'lane' ? rawPosition : clampUnit(rawPosition))
     : 0.5;
   const rawFrom = Number(effect?.from);
   const from = effect?.from !== null
@@ -62,18 +63,25 @@ export function projectileVisualGeometry(effect, laneY, targetLayout = EMPTY_TAR
     ? clampUnit(rawFrom)
     : position;
   const progress = projectileProgress(effect);
-  const trajectory = effect?.trajectory ?? (effect?.type === 'drop-projectile' ? 'drop' : 'lane');
   const targetY = finiteNumber(laneY);
   const layout = normalizedTargetLayout(targetLayout);
+  const interpolatedX = from + ((position - from) * progress);
+  const rawCurrentPosition = Number(effect?.currentPosition);
+  const laneX = effect?.currentPosition !== null
+    && effect?.currentPosition !== undefined
+    && Number.isFinite(rawCurrentPosition)
+    ? rawCurrentPosition
+    : interpolatedX;
+  const followsTargetLayout = trajectory === 'drop' || effect?.status === 'impacted';
 
   return {
     position,
     progress,
     trajectory,
-    x: trajectory === 'lane' ? from + ((position - from) * progress) : position,
+    x: trajectory === 'lane' ? laneX : position,
     y: trajectory === 'drop' ? targetY * progress : targetY,
-    offsetX: progress === 0 ? 0 : layout.chipOffset * progress,
-    offsetY: progress === 0 ? 0 : layout.verticalOffset * progress,
+    offsetX: followsTargetLayout && progress > 0 ? layout.chipOffset * progress : 0,
+    offsetY: followsTargetLayout && progress > 0 ? layout.verticalOffset * progress : 0,
   };
 }
 
@@ -92,7 +100,8 @@ export function resolveProjectileTargetLayouts(
 
   for (const effect of effects ?? []) {
     if (!isProjectileEffect(effect) || effect.id === null || effect.id === undefined) continue;
-    const liveLayout = liveEnemyLayouts?.get?.(effect.targetId);
+    const targetId = effect.impactTargetId ?? effect.targetId;
+    const liveLayout = liveEnemyLayouts?.get?.(targetId);
     const targetLayout = normalizedTargetLayout(
       liveLayout ?? previousCache?.get?.(effect.id),
     );

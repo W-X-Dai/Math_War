@@ -56,6 +56,29 @@ function suppliedParameters(wave) {
   });
 }
 
+function requiredGuaranteedOperators(wave) {
+  const towerRows = new Set();
+  return wave.counterRequirements.flatMap((requirement) => requirement.operators.flatMap((operator) => {
+    if (!OPERATORS[operator.operatorId].parameterKeys?.length) {
+      const key = `${requirement.row}:${operator.operatorId}`;
+      if (towerRows.has(key)) return [];
+      towerRows.add(key);
+      return [operator.operatorId];
+    }
+    return Array.from({ length: requirement.scrollUses }, () => operator.operatorId);
+  }));
+}
+
+function requiredGuaranteedParameters(wave) {
+  return wave.counterRequirements.flatMap((requirement) => (
+    requirement.operators.flatMap((operator) => (
+      operator.parameter == null
+        ? []
+        : Array.from({ length: requirement.scrollUses }, () => operator.parameter)
+    ))
+  ));
+}
+
 test('D is the cheap, fast choice for low order while D² wins high-order reduction efficiency', () => {
   const derivative = OPERATORS.derivative;
   const secondDerivative = OPERATORS.secondDerivative;
@@ -79,9 +102,9 @@ test('D is the cheap, fast choice for low order while D² wins high-order reduct
   );
 });
 
-test('specialist towers save a lane slot over the six-second substitution fallback', () => {
+test('parameter scrolls preserve specialist math without occupying a lane slot', () => {
   const evaluate = OPERATORS.evaluateTower;
-  assert.equal(evaluate.cooldown, 6);
+  assert.equal(evaluate.kind, 'target');
 
   const rational = polynomial([{ coefficient: 3, xPower: -1, yPower: 0 }]);
   assert.ok(isZero(euler(rational, 1)), 'Euler(1) must remove x⁻¹ in one operation');
@@ -93,27 +116,17 @@ test('specialist towers save a lane slot over the six-second substitution fallba
   assert.ok(isZero(resonance(trig, 4)), 'D²+4I must remove frequency 2');
   assert.ok(isZero(resonance(growing, -4)), 'D²−4I must remove growth rate 2');
 
-  assert.ok(
-    OPERATORS.eulerTower.cooldown < evaluate.cooldown + OPERATORS.derivative.cooldown,
-    'Euler must clear its intended family faster than f(k) followed by D',
-  );
-  assert.ok(
-    OPERATORS.resonanceTower.cooldown < evaluate.cooldown + OPERATORS.derivative.cooldown,
-    'resonance must clear its intended family faster than f(k) followed by D',
-  );
-  const specialistSlots = 1;
-  const genericSlots = 2;
-  assert.ok(
-    specialistSlots / genericSlots <= 0.75,
-    'a specialist must save at least 25% of the lane slots used by f(k) then D',
-  );
+  assert.equal(OPERATORS.eulerTower.kind, 'target');
+  assert.equal(OPERATORS.resonanceTower.kind, 'target');
+  assert.equal(OPERATORS.eulerTower.projectile.trajectory, 'drop');
+  assert.equal(OPERATORS.resonanceTower.projectile.trajectory, 'drop');
+  assert.ok(OPERATORS.eulerTower.cost < OPERATORS.derivative.cost);
+  assert.ok(OPERATORS.resonanceTower.cost < OPERATORS.derivative.cost);
 });
 
-test('chapter 4 logarithms require the advertised D then Euler composition', () => {
+test('chapter 4 logarithms have a timing-independent f(1) scroll counter', () => {
   const expression = logarithm(3);
-  const afterDerivative = differentiate(expression);
-  assert.ok(!isZero(afterDerivative));
-  assert.ok(isZero(euler(afterDerivative, 1)));
+  assert.ok(isZero(substituteX(expression, 1)));
 });
 
 test('from chapter 3 onward every formal segment contains a threat that pure D cannot finish', () => {
@@ -135,14 +148,8 @@ test('every generated counter is backed by exact guaranteed operators and parame
     for (const segmentIndex of [1, 2]) {
       for (let seed = 1; seed <= 100; seed += 1) {
         const wave = generateFiniteSegment(seed, chapterIndex, segmentIndex);
-        const requiredOperators = wave.counterRequirements.flatMap((requirement) => (
-          requirement.operators.map((operator) => operator.operatorId)
-        ));
-        const requiredParameters = wave.counterRequirements.flatMap((requirement) => (
-          requirement.operators.flatMap((operator) => (
-            operator.parameter == null ? [] : [operator.parameter]
-          ))
-        ));
+        const requiredOperators = requiredGuaranteedOperators(wave);
+        const requiredParameters = requiredGuaranteedParameters(wave);
         assert.deepEqual(wave.guaranteedSupply.operators, requiredOperators);
         assert.deepEqual(suppliedParameters(wave), requiredParameters);
       }

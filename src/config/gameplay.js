@@ -40,6 +40,7 @@ export const GAMEPLAY_CONFIG = deepFreeze({
     cellCenterOffset: 0.5,
     basePosition: 0.125,
     enemySpawnPosition: 0.955,
+    projectileExitPosition: 1.06,
     effectRow: -1,
     energyEffectPosition: 0.82,
     formulaAndConstantQueueEffectPosition: 0.94,
@@ -70,14 +71,10 @@ export const GAMEPLAY_CONFIG = deepFreeze({
       attackDelayStepSeconds: 0.12,
     },
     tower: {
-      configurableTypeIds: ['subtract', 'evaluateTower', 'eulerTower', 'resonanceTower'],
-      durableTypeIds: ['secondDerivative', 'resonanceTower', 'eulerTower'],
-      boundedTypeId: 'definiteIntegralTower',
+      durableTypeIds: ['secondDerivative'],
       defaultHp: 120,
       durableHp: 150,
-      boundedHp: 180,
       defaultInitialCooldownSeconds: 0.25,
-      subtractInitialCooldownSeconds: 0.7,
       presetInitialCooldownSeconds: 0.25,
       targetRearTolerance: 0.035,
       blockerForwardTolerance: 0.014,
@@ -86,9 +83,11 @@ export const GAMEPLAY_CONFIG = deepFreeze({
   },
   effects: {
     defaultLifetimeSeconds: 0.9,
+    // Lane duration runs from each tower to projectileExitPosition, not to the
+    // enemy that happened to be ahead when the shot was launched.
     projectileTravelSeconds: {
-      lane: 0.52,
-      drop: 0.56,
+      lane: 5,
+      drop: 1.5,
     },
     projectileImpactLingerSeconds: 0.3,
     partialProjectileStaggerSeconds: 0.035,

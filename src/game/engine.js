@@ -6,7 +6,6 @@ import {
   differentiate,
   formatExpression,
   integrate,
-  isEulerCompatible,
   isZero,
   limitAtInfinity,
   multiplyByX,
@@ -62,6 +61,19 @@ function seededRandom(state) {
 
 function formulaCard(id) {
   return FORMULA_CARDS.find((card) => card.id === id);
+}
+
+function parameterKeys(operator) {
+  return operator?.kind === 'target' ? (operator.parameterKeys ?? []) : [];
+}
+
+function parameterScrollReady(item, operator = OPERATORS[item?.operatorId]) {
+  const keys = parameterKeys(operator);
+  return keys.length > 0 && keys.every((key) => item?.[key] !== null && item?.[key] !== undefined);
+}
+
+function parameterDetails(item, operator = OPERATORS[item?.operatorId]) {
+  return Object.fromEntries(parameterKeys(operator).map((key) => [key, item[key]]));
 }
 
 function drawFormulaCard(state) {
@@ -121,16 +133,26 @@ function addOperatorProjectile(state, operatorId, target, source = null, details
   const delay = Math.max(0, Number(details.delay) || 0);
   const travelTime = EFFECTS.projectileTravelSeconds[projectile.trajectory];
   const impactIn = delay + travelTime;
+  const laneProjectile = projectile.trajectory === 'lane' && source;
+  const destinationPosition = laneProjectile
+    ? GEOMETRY.projectileExitPosition
+    : target.position;
   return addEffect(state, {
     type: 'projectile',
     operatorId,
     shape: projectile.shape,
     trajectory: projectile.trajectory,
     targetId: target.id,
+    initialTargetId: target.id,
     sourceTowerId: source?.id ?? null,
     row: target.row,
-    position: target.position,
+    position: destinationPosition,
     ...(source ? { from: source.position } : {}),
+    ...(laneProjectile ? {
+      currentPosition: source.position,
+      destinationPosition,
+      impactTargetId: null,
+    } : {}),
     ...details,
     delay,
     travelTime,
@@ -232,6 +254,7 @@ function spawnSplitChildren(state, enemy) {
 function finishEnemy(state, enemy, reason) {
   if (enemy.dead) return;
   enemy.dead = true;
+  if (state.selectedEnemyId === enemy.id) state.selectedEnemyId = null;
   const baseReward = enemy.reward ?? ENEMY_TYPES[enemy.typeId]?.reward ?? ECONOMY.fallbackEnemyReward;
   const reward = enemy.affixes?.includes('split')
     ? Math.max(
@@ -362,7 +385,7 @@ function reportOperatorError(state, operatorId, previousText, error, sourceTower
     : null;
   if (tower) {
     tower.active = false;
-    notify(state, '運算錯誤停火；重新裝填參數後可恢復。', 'danger');
+    notify(state, `運算錯誤，砲台已停火：${reason}`, 'danger');
   } else {
     notify(state, `命中時無法作用：${reason}`, 'danger');
   }
@@ -379,6 +402,12 @@ function resolveProjectileImpact(state, effect, enemy, frameDt) {
   effect.ttl = EFFECTS.projectileImpactLingerSeconds + frameDt;
   effect.row = enemy.row;
   effect.position = enemy.position;
+  effect.targetId = enemy.id;
+  if (effect.trajectory === 'lane') {
+    effect.currentPosition = enemy.position;
+    effect.destinationPosition = enemy.position;
+    effect.impactTargetId = enemy.id;
+  }
 
   const targetExpression = activeEnemyExpression(enemy);
   const previousText = formatExpression(targetExpression);
@@ -453,14 +482,140 @@ function resolveProjectileMiss(effect, frameDt) {
   effect.ttl = EFFECTS.projectileImpactLingerSeconds + frameDt;
 }
 
+function resolveLaneExit(effect) {
+  effect.status = 'exited';
+  effect.impactResolved = true;
+  effect.missed = true;
+  effect.progress = 1;
+  effect.impactIn = 0;
+  effect.currentPosition = effect.destinationPosition;
+  // The glyph is already fully outside the clipped battlefield at this point,
+  // so no on-screen fade or linger is needed.
+  effect.ttl = 0;
+}
+
+function laneProjectilePosition(effect) {
+  if (Number.isFinite(effect.currentPosition)) return effect.currentPosition;
+  const from = Number(effect.from);
+  const destination = Number(effect.destinationPosition ?? effect.position);
+  if (!Number.isFinite(from) || !Number.isFinite(destination)) return GEOMETRY.basePosition;
+  return from + ((destination - from) * effect.progress);
+}
+
+function laneProjectileSpeed(effect) {
+  const from = Number(effect.from);
+  const destination = Number(effect.destinationPosition ?? effect.position);
+  const travelTime = Number(effect.travelTime);
+  if (!Number.isFinite(from) || !Number.isFinite(destination) || travelTime <= 0) return 0;
+  return Math.max(0, (destination - from) / travelTime);
+}
+
+function laneEnemiesAhead(state, effect) {
+  const projectilePosition = laneProjectilePosition(effect);
+  return state.enemies
+    .filter((enemy) => (
+      !enemy.dead
+      && enemy.row === effect.row
+      && enemy.position > GEOMETRY.basePosition
+      && enemy.position >= projectilePosition - COMBAT.tower.targetRearTolerance
+    ))
+    .sort((left, right) => left.position - right.position);
+}
+
+function findLaneCollision(state, effect, dt, minimumTime = 0) {
+  const projectilePosition = laneProjectilePosition(effect);
+  const projectileSpeed = laneProjectileSpeed(effect);
+  const flightTime = Math.min(dt, Math.max(0, effect.impactIn));
+  if (projectileSpeed <= 0 || flightTime <= 0) return null;
+
+  let collision = null;
+  for (const enemy of laneEnemiesAhead(state, effect)) {
+    const enemySpeed = blockingTower(state, enemy) ? 0 : enemyMovementSpeed(enemy);
+    const gap = Math.max(0, enemy.position - projectilePosition);
+    const collisionIn = gap / (projectileSpeed + enemySpeed);
+    if (collisionIn + 1e-9 < minimumTime) continue;
+    if (collisionIn > flightTime + 1e-9) continue;
+    if (timeUntilBase(state, enemy) + 1e-9 < collisionIn) continue;
+    if (
+      !collision
+      || collisionIn < collision.time - 1e-9
+      || (
+        Math.abs(collisionIn - collision.time) <= 1e-9
+        && enemy.position < collision.enemy.position
+      )
+    ) {
+      collision = {
+        enemy,
+        time: collisionIn,
+        position: projectilePosition + projectileSpeed * collisionIn,
+      };
+    }
+  }
+  return collision;
+}
+
+function advanceLaneProjectile(effect, dt) {
+  const reachesExit = advanceProjectileFlight(effect, dt);
+  const from = Number(effect.from);
+  const destination = Number(effect.destinationPosition);
+  effect.currentPosition = from + ((destination - from) * effect.progress);
+  return reachesExit;
+}
+
+function nextProjectileEvent(state, effect, dt, minimumTime) {
+  if (effect.trajectory === 'lane') {
+    const collision = findLaneCollision(state, effect, dt, minimumTime);
+    const exitIn = effect.impactIn <= dt + 1e-9 ? effect.impactIn : Number.POSITIVE_INFINITY;
+    if (collision && collision.time <= exitIn + 1e-9) {
+      return { effect, kind: 'lane-impact', ...collision };
+    }
+    if (exitIn >= minimumTime - 1e-9 && Number.isFinite(exitIn)) {
+      return { effect, kind: 'lane-exit', time: exitIn };
+    }
+    return null;
+  }
+
+  const arrivalIn = effect.impactIn;
+  if (arrivalIn + 1e-9 < minimumTime || arrivalIn > dt + 1e-9) return null;
+  const target = state.enemies.find((enemy) => (
+    enemy.id === effect.targetId
+    && !enemy.dead
+    && enemy.position > GEOMETRY.basePosition
+  ));
+  if (!target || timeUntilBase(state, target) + 1e-9 < arrivalIn) {
+    return { effect, kind: 'drop-miss', time: arrivalIn, target };
+  }
+  return { effect, kind: 'drop-impact', time: arrivalIn, enemy: target };
+}
+
+function resolveLaneCollision(state, event, frameDt) {
+  const { effect, enemy, position } = event;
+  advanceLaneProjectile(effect, event.time);
+  const originalPosition = enemy.position;
+  enemy.position = position;
+  resolveProjectileImpact(state, effect, enemy, frameDt);
+  if (!enemy.dead) enemy.position = originalPosition;
+}
+
+function advanceUnresolvedProjectile(state, effect, dt) {
+  if (effect.trajectory === 'lane') {
+    advanceLaneProjectile(effect, dt);
+    effect.targetId = laneEnemiesAhead(state, effect)[0]?.id ?? null;
+    return;
+  }
+
+  const target = state.enemies.find((enemy) => enemy.id === effect.targetId && !enemy.dead);
+  if (target) {
+    effect.row = target.row;
+    effect.position = target.position;
+  }
+  advanceProjectileFlight(effect, dt);
+}
+
 function attackEnemy(state, tower, enemy) {
   const targetExpression = activeEnemyExpression(enemy);
   const previousText = formatExpression(targetExpression);
-  const details = {
-    parameter: tower.parameter,
-    lowerBound: tower.lowerBound,
-    upperBound: tower.upperBound,
-  };
+  const details = {};
 
   try {
     // Preflight keeps invalid towers from firing, but the result is discarded.
@@ -480,25 +635,20 @@ function nearestEnemyInLane(state, tower) {
     .filter((enemy) => (
       !enemy.dead
       && enemy.row === tower.row
-      && enemy.position >= tower.position - COMBAT.tower.targetRearTolerance
-      && (tower.typeId !== 'eulerTower' || isEulerCompatible(activeEnemyExpression(enemy)))
+      && enemy.position >= tower.position
     ))
     .sort((a, b) => a.position - b.position)[0] ?? null;
 }
 
 function updateTowers(state, dt) {
   // Enemies advance from right to left. Resolve towers from the forward edge
-  // back toward the core so a D → Euler lane really follows its board order,
-  // regardless of which tower the player happened to deploy first.
+  // back toward the core so lane operations follow board order regardless of
+  // deployment order.
   const firingOrder = [...state.towers].sort((left, right) => (
     right.position - left.position
   ));
   for (const tower of firingOrder) {
-    const awaitingParameter = COMBAT.tower.configurableTypeIds.includes(tower.typeId)
-      && tower.parameter === null;
-    const awaitingBounds = tower.typeId === COMBAT.tower.boundedTypeId
-      && (tower.lowerBound === null || tower.upperBound === null);
-    if (!tower.active || awaitingParameter || awaitingBounds) continue;
+    if (!tower.active) continue;
     tower.cooldown -= dt;
     if (tower.cooldown > 0) continue;
 
@@ -604,43 +754,42 @@ function updateEnemies(state, dt) {
 }
 
 function updateProjectileImpacts(state, dt) {
-  const flyingProjectiles = state.effects
-    .map((effect, index) => ({ effect, index }))
-    .filter(({ effect }) => effect.type === 'projectile' && !effect.impactResolved)
-    .sort((left, right) => (
-      left.effect.impactIn - right.effect.impactIn || left.index - right.index
-    ))
-    .map(({ effect }) => effect);
+  const pending = state.effects.filter((effect) => (
+    effect.type === 'projectile' && !effect.impactResolved
+  ));
+  let eventTime = 0;
 
-  for (const effect of flyingProjectiles) {
-    const target = state.enemies.find((enemy) => (
-      enemy.id === effect.targetId
-      && !enemy.dead
-      && enemy.position > GEOMETRY.basePosition
-    ));
-    if (!target) {
-      // The shot keeps its original target snapshot. It must not retarget or
-      // deal damage, but should visibly finish the route it already started.
-      if (advanceProjectileFlight(effect, dt)) resolveProjectileMiss(effect, dt);
-      continue;
+  while (pending.length > 0) {
+    const events = pending
+      .map((effect, index) => ({ event: nextProjectileEvent(state, effect, dt, eventTime), index }))
+      .filter(({ event }) => event)
+      .sort((left, right) => left.event.time - right.event.time || left.index - right.index);
+    const next = events[0]?.event;
+    if (!next) break;
+
+    pending.splice(pending.indexOf(next.effect), 1);
+    eventTime = Math.max(eventTime, next.time);
+    if (next.kind === 'lane-impact') {
+      resolveLaneCollision(state, next, dt);
+    } else if (next.kind === 'lane-exit') {
+      advanceLaneProjectile(next.effect, next.time);
+      resolveLaneExit(next.effect);
+    } else if (next.kind === 'drop-impact') {
+      next.effect.row = next.enemy.row;
+      next.effect.position = next.enemy.position;
+      advanceProjectileFlight(next.effect, next.time);
+      resolveProjectileImpact(state, next.effect, next.enemy, dt);
+    } else {
+      if (next.target && timeUntilBase(state, next.target) + 1e-9 < next.time) {
+        next.effect.row = next.target.row;
+        next.effect.position = GEOMETRY.basePosition;
+      }
+      advanceProjectileFlight(next.effect, next.time);
+      resolveProjectileMiss(next.effect, dt);
     }
-
-    // Resolve events chronologically inside a long frame. If this enemy reaches
-    // the proof core before this projectile would arrive, the shot is a miss;
-    // updateEnemies will settle the body damage later in the same tick.
-    const baseIn = timeUntilBase(state, target);
-    if (baseIn <= dt + 1e-9 && baseIn + 1e-9 < effect.impactIn) {
-      effect.row = target.row;
-      effect.position = GEOMETRY.basePosition;
-      if (advanceProjectileFlight(effect, dt)) resolveProjectileMiss(effect, dt);
-      continue;
-    }
-
-    effect.row = target.row;
-    effect.position = target.position;
-    const reachesTarget = advanceProjectileFlight(effect, dt);
-    if (reachesTarget) resolveProjectileImpact(state, effect, target, dt);
   }
+
+  for (const effect of pending) advanceUnresolvedProjectile(state, effect, dt);
 }
 
 function syncResolvedProjectiles(state) {
@@ -650,6 +799,10 @@ function syncResolvedProjectiles(state) {
     if (!target) continue;
     effect.row = target.row;
     effect.position = target.position;
+    if (effect.trajectory === 'lane') {
+      effect.currentPosition = target.position;
+      effect.destinationPosition = target.position;
+    }
   }
 }
 
@@ -745,8 +898,8 @@ function checkWaveState(state) {
   const allSpawned = state.nextSpawnIndex >= wave.entries.length;
   const noneAlive = !state.enemies.some((enemy) => !enemy.dead);
   if (!allSpawned || !noneAlive) return;
-  // Let every launched projectile finish its flight and resolution animation
-  // before configureWave clears effects for the next segment or tutorial.
+  // The enemy card is already gone, but every launched projectile must still
+  // hit another enemy or leave the battlefield before the wave can advance.
   if (state.effects.some((effect) => effect.type === 'projectile')) return;
   state.enemies = state.enemies.filter((enemy) => !enemy.dead);
   clearProjectiles(state);
@@ -809,13 +962,14 @@ export function chapterEnemyTutorials(chapterIndex) {
 }
 
 function towerHp(typeId) {
-  if (typeId === COMBAT.tower.boundedTypeId) return COMBAT.tower.boundedHp;
   if (COMBAT.tower.durableTypeIds.includes(typeId)) return COMBAT.tower.durableHp;
   return COMBAT.tower.defaultHp;
 }
 
 function createPresetTower(state, spec) {
-  const configurable = COMBAT.tower.configurableTypeIds.includes(spec.typeId);
+  if (OPERATORS[spec.typeId]?.kind !== 'tower') {
+    throw new RangeError(`Tutorial preset ${spec.typeId} is not a tower`);
+  }
   const hp = towerHp(spec.typeId);
   return {
     id: nextId(state, 'tutorial-tower'),
@@ -828,9 +982,6 @@ function createPresetTower(state, spec) {
     cooldown: COMBAT.tower.presetInitialCooldownSeconds,
     fireFlash: 0,
     active: true,
-    parameter: configurable ? (spec.parameter ?? null) : undefined,
-    lowerBound: spec.typeId === COMBAT.tower.boundedTypeId ? (spec.lowerBound ?? null) : undefined,
-    upperBound: spec.typeId === COMBAT.tower.boundedTypeId ? (spec.upperBound ?? null) : undefined,
     tutorialPreset: true,
   };
 }
@@ -1195,6 +1346,7 @@ export function tick(state, rawDt) {
     state.nextSpawnIndex >= state.currentWave.entries.length
     && !state.enemies.some((enemy) => !enemy.dead)
   ) {
+    state.enemies = state.enemies.filter((enemy) => !enemy.dead);
     checkWaveState(state);
     return;
   }
@@ -1242,6 +1394,17 @@ export function selectArsenalItem(state, itemId) {
   const operator = item ? OPERATORS[item.operatorId] : null;
   if (!operator || operator.unlockChapter > state.chapterIndex) {
     notify(state, '這個算子尚未解鎖。', 'danger');
+    return false;
+  }
+  if (
+    parameterKeys(operator).length > 0
+    && !parameterScrollReady(item, operator)
+    && state.selectedStoredConstantId !== null
+  ) {
+    return inscribeParameterScroll(state, itemId);
+  }
+  if (parameterKeys(operator).length > 0 && !parameterScrollReady(item, operator)) {
+    notify(state, '先在工坊組出常數，選取後點這張捲軸刻寫。', 'neutral');
     return false;
   }
   if (state.energy < operator.cost) {
@@ -1319,7 +1482,6 @@ export function placeTower(state, row, column) {
   state.energy -= operator.cost;
   consumeOperatorItem(state);
   const hp = towerHp(operator.id);
-  const configurable = COMBAT.tower.configurableTypeIds.includes(operator.id);
   state.towers.push({
     id: nextId(state, 'tower'),
     typeId: operator.id,
@@ -1328,14 +1490,9 @@ export function placeTower(state, row, column) {
     position: towerPosition(column, state.board),
     hp,
     maxHp: hp,
-    cooldown: operator.id === 'subtract'
-      ? COMBAT.tower.subtractInitialCooldownSeconds
-      : COMBAT.tower.defaultInitialCooldownSeconds,
+    cooldown: COMBAT.tower.defaultInitialCooldownSeconds,
     fireFlash: 0,
     active: true,
-    parameter: configurable ? null : undefined,
-    lowerBound: operator.id === COMBAT.tower.boundedTypeId ? null : undefined,
-    upperBound: operator.id === COMBAT.tower.boundedTypeId ? null : undefined,
   });
   state.selectedOperator = null;
   state.selectedOperatorItemId = null;
@@ -1365,7 +1522,8 @@ export function recycleTower(state, towerId) {
 export const discardTower = recycleTower;
 
 export function selectEnemy(state, enemyId) {
-  state.selectedEnemyId = enemyId;
+  const enemy = state.enemies.find((candidate) => candidate.id === enemyId && !candidate.dead);
+  state.selectedEnemyId = enemy?.id ?? null;
 }
 
 export function applyTargetOperator(state, enemyId) {
@@ -1377,11 +1535,18 @@ export function applyTargetOperator(state, enemyId) {
     && !candidate.dead
     && candidate.position > GEOMETRY.basePosition
   ));
-  if (!operator || operatorItem?.operatorId !== operatorId || !enemy || state.energy < operator.cost) return false;
+  if (
+    !operator
+    || operator.kind !== 'target'
+    || operatorItem?.operatorId !== operatorId
+    || (parameterKeys(operator).length > 0 && !parameterScrollReady(operatorItem, operator))
+    || !enemy
+    || state.energy < operator.cost
+  ) return false;
 
   const targetExpression = activeEnemyExpression(enemy);
   const before = formatExpression(targetExpression);
-  const details = {};
+  const details = parameterDetails(operatorItem, operator);
   const previousRngState = state.rngState;
 
   try {
@@ -1405,7 +1570,7 @@ export function applyTargetOperator(state, enemyId) {
   state.targetingOperator = null;
   state.selectedOperatorItemId = null;
   addOperatorProjectile(state, operatorId, enemy, null, details);
-  notify(state, `${operator.symbol} 彈頭已發射；命中後結算。`, 'success');
+  notify(state, `${operator.name}已發射；命中後結算。`, 'success');
   return true;
 }
 
@@ -1627,57 +1792,45 @@ export function prepareAssembly(state) {
   return true;
 }
 
-export function installAssembly(state, towerId) {
+export function inscribeParameterScroll(state, itemId) {
   const stored = state.storedConstants.find((item) => item.id === state.selectedStoredConstantId);
   if (!stored) return false;
-  const tower = state.towers.find((candidate) => candidate.id === towerId);
-  const configurable = tower && (
-    COMBAT.tower.configurableTypeIds.includes(tower.typeId)
-    || tower.typeId === COMBAT.tower.boundedTypeId
-  );
-  if (!configurable) {
-    notify(state, '這座塔沒有可裝入常數的空槽。', 'danger');
+  const item = state.operatorQueue.find((candidate) => candidate.id === itemId);
+  const operator = item ? OPERATORS[item.operatorId] : null;
+  const keys = parameterKeys(operator);
+  if (!item || keys.length === 0) {
+    notify(state, '這張軍械沒有可刻寫的參數槽。', 'danger');
+    return false;
+  }
+  if (parameterScrollReady(item, operator)) {
+    notify(state, '這張捲軸已刻寫完成；要改參數請改用另一張空白捲軸。', 'neutral');
     return false;
   }
 
-  const value = stored.value;
-  if (tower.typeId === 'subtract') {
-    tower.parameter = value;
-    addLog(state, `參數平移砲完成：P(x) − ${value}`, 'success');
-  } else if (tower.typeId === 'evaluateTower') {
-    tower.parameter = value;
-    addLog(state, `代入塔完成：f(${value})`, 'success');
-  } else if (tower.typeId === 'eulerTower') {
-    tower.parameter = value;
-    addLog(state, `Euler 塔完成：xD + ${value}I`, 'success');
-  } else if (tower.typeId === 'resonanceTower') {
-    tower.parameter = value;
-    addLog(state, `共振塔完成：D² + ${value}I`, 'success');
-  } else if (tower.lowerBound === null) {
-    tower.lowerBound = value;
-    addLog(state, `定積分塔下界裝入 ${value}`, 'success');
-  } else if (tower.upperBound === null) {
-    tower.upperBound = value;
-    addLog(state, `定積分塔上界裝入 ${value}`, 'success');
-  } else {
-    tower.lowerBound = value;
-    tower.upperBound = null;
-    addLog(state, `定積分塔重新組裝：下界 ${value}，等待上界`, 'success');
-  }
+  const key = keys.find((candidate) => item[candidate] === null || item[candidate] === undefined);
+  item[key] = stored.value;
+  state.storedConstants = state.storedConstants.filter((candidate) => candidate.id !== stored.id);
+  state.selectedStoredConstantId = null;
+  cancelSelection(state);
 
-  state.storedConstants = state.storedConstants.filter((item) => item.id !== stored.id);
-  state.selectedStoredConstantId = state.storedConstants[0]?.id ?? null;
-  tower.active = true;
+  const ready = parameterScrollReady(item, operator);
+  const slotLabel = key === 'lowerBound' ? '下界' : key === 'upperBound' ? '上界' : '參數';
+  addLog(state, `${operator.name}${slotLabel}刻寫 ${stored.value}`, ready ? 'success' : 'neutral');
   notify(
     state,
-    tower.typeId === COMBAT.tower.boundedTypeId ? '積分界已裝入。' : '參數塔已啟動。',
-    'success',
+    ready ? `${operator.name}刻寫完成；再點一次即可選擇目標。` : '下界已刻寫；請再選一個常數刻寫上界。',
+    ready ? 'success' : 'neutral',
   );
   return true;
 }
 
+export function installAssembly(state, destinationId) {
+  return inscribeParameterScroll(state, destinationId);
+}
+
 export function selectStoredConstant(state, itemId) {
   if (!state.storedConstants.some((item) => item.id === itemId)) return false;
+  if (state.targetingOperator || state.partialConfirmOpen || state.selectedOperator) cancelSelection(state);
   state.selectedStoredConstantId = state.selectedStoredConstantId === itemId ? null : itemId;
   return true;
 }

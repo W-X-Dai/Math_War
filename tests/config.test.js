@@ -57,7 +57,7 @@ test('six chapters declare the approved rhythm, order, and guaranteed supply sha
   });
 });
 
-test('operator unlock order and efficiency match the six-chapter curriculum', () => {
+test('operator unlock order and tower versus scroll roles match the curriculum', () => {
   assert.equal(OPERATORS.derivative.unlockChapter, 0);
   assert.equal(OPERATORS.subtract.unlockChapter, 0);
   assert.equal(OPERATORS.secondDerivative.unlockChapter, 1);
@@ -72,15 +72,25 @@ test('operator unlock order and efficiency match the six-chapter curriculum', ()
   assert.equal(OPERATORS.secondDerivative.cost, 150);
   assert.equal(OPERATORS.secondDerivative.cooldown, 2.2);
   assert.ok(2 / OPERATORS.secondDerivative.cooldown > 1 / OPERATORS.derivative.cooldown);
-  assert.equal(OPERATORS.evaluateTower.cost, 130);
-  assert.equal(OPERATORS.evaluateTower.cooldown, 6);
+  const parameterScrollIds = [
+    'subtract', 'definiteIntegralTower', 'evaluateTower', 'eulerTower', 'resonanceTower',
+  ];
+  for (const operatorId of parameterScrollIds) {
+    assert.equal(OPERATORS[operatorId].kind, 'target');
+    assert.equal(OPERATORS[operatorId].projectile.trajectory, 'drop');
+    assert.ok(OPERATORS[operatorId].parameterKeys.length >= 1);
+    assert.ok(OPERATORS[operatorId].cost < OPERATORS.derivative.cost);
+  }
+  assert.deepEqual(OPERATORS.definiteIntegralTower.parameterKeys, ['lowerBound', 'upperBound']);
+  assert.deepEqual(OPERATORS.eulerTower.parameterKeys, ['parameter']);
 });
 
-test('projectile timing preserves the sub-second combat contract', () => {
+test('projectile timing and exit boundary preserve the deliberate slow-flight contract', () => {
   assert.deepEqual(GAMEPLAY_CONFIG.effects.projectileTravelSeconds, {
-    lane: 0.52,
-    drop: 0.56,
+    lane: 5,
+    drop: 1.5,
   });
+  assert.ok(GAMEPLAY_CONFIG.geometry.projectileExitPosition > 1);
 });
 
 test('recognition tutorials are fixed two-to-three enemy sandboxes without affixes', () => {
@@ -94,6 +104,7 @@ test('recognition tutorials are fixed two-to-three enemy sandboxes without affix
     assert.ok(tutorial.starterOperators.length <= OPERATOR_QUEUE_CAPACITY);
     for (const tower of tutorial.presetTowers) {
       assert.ok(OPERATORS[tower.typeId]);
+      assert.equal(OPERATORS[tower.typeId].kind, 'tower');
       assert.ok(tower.row >= 0 && tower.row < CHAPTERS[chapterIndex].board.rows);
       assert.ok(tower.column >= 0 && tower.column < CHAPTERS[chapterIndex].board.placeableColumns);
     }

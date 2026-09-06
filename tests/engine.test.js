@@ -77,6 +77,11 @@ function addArsenalCard(state, operatorId, id = `manual-${operatorId}`) {
   return id;
 }
 
+function addConfiguredScroll(state, operatorId, details, id = `manual-${operatorId}`) {
+  state.operatorQueue.push({ id, operatorId, ...details });
+  return id;
+}
+
 function configuredTower(typeId, parameter, overrides = {}) {
   return {
     id: `tower-${typeId}`, typeId, row: 0, column: 0, position: 0.2,
@@ -96,6 +101,21 @@ function advanceBy(state, seconds) {
     tick(state, step);
     remaining -= step;
   }
+}
+
+function stationaryLaneCollisionIn(projectile, enemy) {
+  const currentPosition = projectile.currentPosition ?? projectile.from;
+  const destination = projectile.destinationPosition ?? projectile.position;
+  const speed = (destination - projectile.from) / projectile.travelTime;
+  return Math.max(0, (enemy.position - currentPosition) / speed);
+}
+
+function setLaneProjectilePosition(projectile, position) {
+  projectile.currentPosition = position;
+  projectile.progress = (position - projectile.from)
+    / (projectile.destinationPosition - projectile.from);
+  projectile.impactIn = projectile.travelTime * (1 - projectile.progress);
+  projectile.ttl = projectile.impactIn + GAMEPLAY_CONFIG.effects.projectileImpactLingerSeconds;
 }
 
 function assertProjectile(effect, operatorId, expected = {}) {
@@ -419,7 +439,7 @@ test('a shielded enemy uses its body damage at the base and leaves without a kil
   assert.equal(state.baseHp, 488);
 });
 
-test('non-leading formula and constant cards assemble and install', () => {
+test('non-leading formula and constant cards assemble and inscribe a scroll', () => {
   const state = createGame(14);
   const formula = state.formulaQueue.find((item) => item.cardId === 'doubleK');
   const constant = state.constantQueue.find((item) => item.value === 2);
@@ -431,13 +451,57 @@ test('non-leading formula and constant cards assemble and install', () => {
   assert.equal(state.storedConstants.length, 1);
   assert.equal(state.storedConstants[0].value, 4);
   assert.equal(selectArsenalItem(state, subtractCard.id), true);
-  assert.equal(placeTower(state, 0, 0), true);
-  const placedTower = state.towers.find((tower) => tower.typeId === 'subtract' && !tower.tutorialPreset);
-  assert.equal(installAssembly(state, placedTower.id), true);
-  assert.equal(placedTower.parameter, 4);
+  assert.equal(subtractCard.parameter, 4);
+  assert.equal(state.towers.some((tower) => tower.typeId === 'subtract'), false);
+  assert.equal(state.operatorQueue.some((item) => item.id === subtractCard.id), true);
   assert.equal(state.storedConstants.length, 0);
   assert.equal(state.formulaQueue.some((item) => item.id === formula.id), false);
   assert.equal(state.constantQueue.some((item) => item.id === constant.id), false);
+});
+
+test('a blank parameter scroll cannot target until it has been inscribed', () => {
+  const state = createGame(140);
+  state.chapterIndex = 5;
+  state.operatorQueue = [];
+  const cardId = addArsenalCard(state, 'eulerTower');
+  const energyBefore = state.energy;
+
+  assert.equal(selectArsenalItem(state, cardId), false);
+  assert.equal(state.targetingOperator, null);
+  assert.equal(state.operatorQueue.some((item) => item.id === cardId), true);
+  assert.equal(state.energy, energyBefore);
+});
+
+test('a definite-integral scroll records both bounds before entering targeting mode', () => {
+  const state = createGame(143);
+  state.chapterIndex = 5;
+  state.operatorQueue = [];
+  state.storedConstants = [
+    { id: 'lower', value: 0 },
+    { id: 'upper', value: Math.PI },
+  ];
+  state.selectedStoredConstantId = 'lower';
+  const cardId = addArsenalCard(state, 'definiteIntegralTower');
+  const card = state.operatorQueue[0];
+
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(card.lowerBound, 0);
+  assert.equal(card.upperBound, undefined);
+  assert.equal(state.selectedStoredConstantId, null);
+  assert.equal(selectStoredConstant(state, 'upper'), true);
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(card.upperBound, Math.PI);
+  assert.equal(state.selectedStoredConstantId, null);
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(state.targetingOperator, 'definiteIntegralTower');
+  assert.equal(state.selectedOperatorItemId, cardId);
+  assert.equal(selectArsenalItem(state, cardId), true);
+  state.storedConstants = [{ id: 'replacement', value: 7 }];
+  state.selectedStoredConstantId = 'replacement';
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(card.lowerBound, 0);
+  assert.equal(card.upperBound, Math.PI);
+  assert.equal(state.storedConstants[0].id, 'replacement');
 });
 
 test('assembled constants store up to five without consuming materials on overflow', () => {
@@ -464,7 +528,7 @@ test('assembled constants store up to five without consuming materials on overfl
   assert.equal(state.constantQueue.length, constantsBefore);
 });
 
-test('any stored constant can be selected, discarded, or consumed by a tower', () => {
+test('any stored constant can be selected, discarded, or inscribed on a parameter scroll', () => {
   const state = createGame(142);
   state.storedConstants = [
     { id: 'stored-a', value: 2, source: 'k｜k=2' },
@@ -472,18 +536,20 @@ test('any stored constant can be selected, discarded, or consumed by a tower', (
     { id: 'stored-c', value: 11, source: 'k｜k=11' },
   ];
   state.selectedStoredConstantId = 'stored-a';
-  const ordinaryTower = configuredTower('derivative');
-  const configurableTower = configuredTower('subtract', null);
-  state.towers.push(ordinaryTower, configurableTower);
+  const ordinaryCard = { id: 'ordinary-card', operatorId: 'derivative' };
+  const parameterScroll = { id: 'parameter-scroll', operatorId: 'eulerTower' };
+  state.operatorQueue.push(ordinaryCard, parameterScroll);
 
   assert.equal(selectStoredConstant(state, 'stored-b'), true);
-  assert.equal(installAssembly(state, ordinaryTower.id), false);
+  assert.equal(installAssembly(state, ordinaryCard.id), false);
   assert.equal(state.storedConstants.length, 3);
-  assert.equal(installAssembly(state, configurableTower.id), true);
-  assert.equal(configurableTower.parameter, 7);
+  assert.equal(installAssembly(state, parameterScroll.id), true);
+  assert.equal(parameterScroll.parameter, 7);
   assert.deepEqual(state.storedConstants.map((item) => item.value), [2, 11]);
   assert.equal(discardStoredConstant(state, 'stored-c'), true);
   assert.deepEqual(state.storedConstants.map((item) => item.value), [2]);
+  assert.equal(selectStoredConstant(state, 'stored-a'), true);
+  assert.equal(state.selectedStoredConstantId, 'stored-a');
   assert.equal(selectStoredConstant(state, 'stored-a'), true);
   assert.equal(state.selectedStoredConstantId, null);
 });
@@ -523,11 +589,14 @@ test('pressure resources continue into mixed and clearing mixed wins the selecte
   state.energy = 1;
   state.storedConstants = [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }];
   state.selectedStoredConstantId = 'persistent-constant';
-  const persistentTower = configuredTower('eulerTower', 2, {
+  const persistentTower = configuredTower('secondDerivative', undefined, {
     id: 'persistent-tower', row: 3, column: 3, hp: 77, maxHp: 150,
   });
   state.towers.push(persistentTower);
   state.operatorQueue.push({ id: 'persistent-card', operatorId: 'derivative', source: 'random' });
+  state.operatorQueue.push({
+    id: 'persistent-scroll', operatorId: 'eulerTower', parameter: 2, source: 'random',
+  });
   state.baseHp = 350;
 
   state.phase = 'running';
@@ -544,9 +613,9 @@ test('pressure resources continue into mixed and clearing mixed wins the selecte
   assert.deepEqual(state.storedConstants, [{ id: 'persistent-constant', value: 9, source: 'k+10｜k=-1' }]);
   assert.equal(state.selectedStoredConstantId, 'persistent-constant');
   assert.ok(state.operatorQueue.some((item) => item.id === 'persistent-card'));
+  assert.equal(state.operatorQueue.find((item) => item.id === 'persistent-scroll').parameter, 2);
   const continuedTower = state.towers.find((tower) => tower.id === persistentTower.id);
   assert.equal(continuedTower.hp, 77);
-  assert.equal(continuedTower.parameter, 2);
 
   state.phase = 'running';
   state.currentWave = { ...state.currentWave, entries: [] };
@@ -559,6 +628,7 @@ test('pressure resources continue into mixed and clearing mixed wins the selecte
   assert.equal(state.baseHp, 350);
   assert.equal(state.energy, 1);
   assert.ok(state.operatorQueue.some((item) => item.id === 'persistent-card'));
+  assert.equal(state.operatorQueue.find((item) => item.id === 'persistent-scroll').parameter, 2);
   assert.equal(state.towers.find((tower) => tower.id === persistentTower.id).hp, 77);
 });
 
@@ -612,7 +682,7 @@ test('endless starts from its fixed loadout and preserves resources between roun
   assert.ok(state.operatorQueue.some((item) => item.id === 'endless-card'));
 });
 
-test('new parameter towers apply their mathematical operators', async (t) => {
+test('configured parameter scrolls apply their mathematical operators without occupying a lane', async (t) => {
   const cases = [
     ['D² + 4I annihilates sin(2x)', 'resonanceTower', 4, trigonometric('sin', 2, 3)],
     ['xD + 2I annihilates x^-2', 'eulerTower', 2, polynomial([term(5, -2)])],
@@ -621,56 +691,46 @@ test('new parameter towers apply their mathematical operators', async (t) => {
   for (const [name, typeId, parameter, expression] of cases) {
     await t.test(name, () => {
       const state = createGame(20 + parameter);
+      state.chapterIndex = 5;
       freezeSpawns(state);
-      const target = testEnemy(expression);
+      state.towers = [];
+      state.operatorQueue = [];
+      const target = testEnemy(expression, { speed: 0 });
       state.enemies.push(target);
-      state.towers.push(configuredTower(typeId, parameter));
-      tick(state, 0.01);
+      const cardId = addConfiguredScroll(state, typeId, { parameter });
+      assert.equal(selectArsenalItem(state, cardId), true);
+      assert.equal(applyTargetOperator(state, target.id), true);
+      assert.equal(state.towers.length, 0);
       assert.equal(state.enemies.length, 1);
       assert.equal(formatExpression(target.expression), formatExpression(expression));
       const [projectile] = projectileEffects(state);
+      assertProjectile(projectile, typeId, {
+        parameter,
+        targetId: target.id,
+        sourceTowerId: null,
+      });
       advanceBy(state, projectile.impactIn + 0.001);
-      assert.equal(state.enemies.length, 0);
+      assert.equal(target.dead, true);
+      assert.equal(formatExpression(target.expression), '0');
+      assert.equal(state.enemies.includes(target), false);
     });
   }
 });
 
 test('f(k) substitutes x without silently setting y to zero', () => {
   const state = createGame(24);
+  state.chapterIndex = 5;
   freezeSpawns(state);
   state.towers = [];
+  state.operatorQueue = [];
   const target = testEnemy(polynomial([term(1, 1, 2)]));
-  const tower = configuredTower('evaluateTower', 1);
   state.enemies.push(target);
-  state.towers.push(tower);
+  const cardId = addConfiguredScroll(state, 'evaluateTower', { parameter: 1 });
 
-  tick(state, 0.01);
-  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.lane);
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(applyTargetOperator(state, target.id), true);
+  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.drop);
   assert.equal(formatExpression(target.expression), 'y^2');
-});
-
-test('same-lane tower chains resolve from the forward column toward the core', () => {
-  const state = createGame(25);
-  freezeSpawns(state);
-  const target = testEnemy(logarithm(3), { speed: 0 });
-  // Deliberately store the towers in the opposite order from their positions.
-  // Board order, not deployment order, must make D transform ln|x| before Euler(1).
-  const rearEuler = configuredTower('eulerTower', 1, {
-    id: 'rear-euler', column: 0, position: 0.2,
-  });
-  const forwardDerivative = configuredTower('derivative', undefined, {
-    id: 'forward-derivative', column: 2, position: 0.4,
-  });
-  state.enemies = [target];
-  state.towers = [rearEuler, forwardDerivative];
-
-  tick(state, 0.01);
-  assert.deepEqual(
-    projectileEffects(state).map((effect) => effect.sourceTowerId),
-    ['forward-derivative', 'rear-euler'],
-  );
-  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.lane + 0.001);
-  assert.equal(state.enemies.length, 0);
 });
 
 test('every tower attack emits its own semantic projectile metadata', async (t) => {
@@ -681,39 +741,9 @@ test('every tower attack emits its own semantic projectile metadata', async (t) 
       expected: {},
     },
     {
-      operatorId: 'subtract',
-      parameter: 3,
-      expression: polynomial([term(1, 1)]),
-      expected: { parameter: 3 },
-    },
-    {
       operatorId: 'secondDerivative',
       expression: polynomial([term(1, 3)]),
       expected: {},
-    },
-    {
-      operatorId: 'definiteIntegralTower',
-      expression: polynomial([term(1, 1)]),
-      tower: { lowerBound: 0, upperBound: 1 },
-      expected: { lowerBound: 0, upperBound: 1 },
-    },
-    {
-      operatorId: 'evaluateTower',
-      parameter: 2,
-      expression: polynomial([term(1, 1), term(1)]),
-      expected: { parameter: 2 },
-    },
-    {
-      operatorId: 'eulerTower',
-      parameter: 1,
-      expression: polynomial([term(1, 2)]),
-      expected: { parameter: 1 },
-    },
-    {
-      operatorId: 'resonanceTower',
-      parameter: 1,
-      expression: exponential(1, 2),
-      expected: { parameter: 1 },
     },
   ];
 
@@ -729,12 +759,10 @@ test('every tower attack emits its own semantic projectile metadata', async (t) 
       state.towers = [];
       state.effects = [];
       const target = testEnemy(fixture.expression);
-      const targetPosition = target.position;
       state.enemies = [target];
       state.towers.push(configuredTower(
         fixture.operatorId,
-        fixture.parameter,
-        fixture.tower,
+        undefined,
       ));
 
       tick(state, 0.01);
@@ -746,7 +774,11 @@ test('every tower attack emits its own semantic projectile metadata', async (t) 
         sourceTowerId: `tower-${fixture.operatorId}`,
         row: 0,
         from: 0.2,
-        position: targetPosition,
+        position: GAMEPLAY_CONFIG.geometry.projectileExitPosition,
+        currentPosition: 0.2,
+        destinationPosition: GAMEPLAY_CONFIG.geometry.projectileExitPosition,
+        initialTargetId: target.id,
+        impactTargetId: null,
         ...fixture.expected,
       });
     });
@@ -778,6 +810,31 @@ test('an idle ready tower does not bank cooldown and burst-fire at the next targ
 test('every single-target operator emits a falling semantic projectile', async (t) => {
   const cases = [
     {
+      operatorId: 'subtract',
+      expression: polynomial(3),
+      details: { parameter: 3 },
+    },
+    {
+      operatorId: 'definiteIntegralTower',
+      expression: polynomial([term(1, 1)]),
+      details: { lowerBound: 0, upperBound: 1 },
+    },
+    {
+      operatorId: 'evaluateTower',
+      expression: polynomial([term(1, 1)]),
+      details: { parameter: 0 },
+    },
+    {
+      operatorId: 'eulerTower',
+      expression: polynomial([term(1, -1)]),
+      details: { parameter: 1 },
+    },
+    {
+      operatorId: 'resonanceTower',
+      expression: trigonometric('sin', 1),
+      details: { parameter: 1 },
+    },
+    {
       operatorId: 'integral',
       expression: polynomial([term(1, 2)]),
     },
@@ -806,7 +863,9 @@ test('every single-target operator emits a falling semantic projectile', async (
       state.operatorQueue = [];
       const target = testEnemy(fixture.expression, { row: 2, position: 0.68 });
       state.enemies = [target];
-      const cardId = addArsenalCard(state, fixture.operatorId);
+      const cardId = fixture.details
+        ? addConfiguredScroll(state, fixture.operatorId, fixture.details)
+        : addArsenalCard(state, fixture.operatorId);
       assert.equal(selectArsenalItem(state, cardId), true);
 
       assert.equal(applyTargetOperator(state, target.id), true);
@@ -818,6 +877,7 @@ test('every single-target operator emits a falling semantic projectile', async (
         sourceTowerId: null,
         row: target.row,
         position: target.position,
+        ...fixture.details,
       });
       assert.equal(projectiles[0].from, undefined);
       if (fixture.operatorId === 'integral') {
@@ -827,12 +887,12 @@ test('every single-target operator emits a falling semantic projectile', async (
   }
 });
 
-test('a projectile changes the enemy only when its flight reaches the impact boundary', () => {
+test('a lane projectile changes the enemy only when their paths intersect', () => {
   const state = createGame(450);
   freezeSpawns(state);
   state.towers = [];
   state.effects = [];
-  const target = testEnemy(polynomial([term(1, 2)]), { id: 'timed-impact' });
+  const target = testEnemy(polynomial([term(1, 2)]), { id: 'timed-impact', speed: 0 });
   const tower = configuredTower('derivative');
   state.enemies = [target];
   state.towers = [tower];
@@ -844,14 +904,15 @@ test('a projectile changes the enemy only when its flight reaches the impact bou
     sourceTowerId: tower.id,
   });
   tower.cooldown = 999;
+  const collisionIn = stationaryLaneCollisionIn(projectile, target);
   assert.equal(formatExpression(target.expression), 'x^2');
   assert.equal(state.effects.some((effect) => effect.type === 'operator'), false);
 
-  advanceBy(state, projectile.travelTime - 0.001);
+  advanceBy(state, collisionIn - 0.001);
   assert.equal(formatExpression(target.expression), 'x^2');
   assert.equal(projectile.status, 'flying');
   assert.equal(projectile.impactResolved, false);
-  assert.ok(projectile.progress > 0.99 && projectile.progress < 1);
+  assert.ok(projectile.progress > 0 && projectile.progress < 1);
 
   advanceBy(state, 0.002);
   assert.equal(formatExpression(target.expression), '2x');
@@ -868,30 +929,27 @@ test('a projectile changes the enemy only when its flight reaches the impact bou
   assert.equal(state.effects.filter((effect) => effect.type === 'operator').length, 1);
 });
 
-test('a tower projectile reaches a moving enemy near the base before it leaks', () => {
+test('a tower only launches a right-moving lane projectile at an enemy ahead', () => {
   const state = createGame(460);
   freezeSpawns(state);
   state.towers = [];
   state.effects = [];
   const target = testEnemy(polynomial(7), {
-    id: 'near-base-moving-target', position: 0.17, speed: 0.015, reward: 80,
+    id: 'behind-tower-target', position: 0.17, speed: 0,
   });
   const tower = configuredTower('derivative');
   state.enemies = [target];
   state.towers = [tower];
-  const baseHpBefore = state.baseHp;
+  tick(state, 0.01);
+  assert.equal(projectileEffects(state).length, 0);
 
+  target.position = 0.3;
   tick(state, 0.01);
   const [projectile] = projectileEffects(state);
-  tower.cooldown = 999;
-  assert.equal(projectile.travelTime, 0.52);
-
-  advanceBy(state, projectile.impactIn + 0.001);
-
-  assert.equal(projectile.status, 'impacted');
-  assert.equal(projectile.missed, false);
-  assert.equal(state.kills, 1);
-  assert.equal(state.baseHp, baseHpBefore);
+  assertProjectile(projectile, 'derivative', {
+    currentPosition: tower.position,
+    destinationPosition: GAMEPLAY_CONFIG.geometry.projectileExitPosition,
+  });
 });
 
 test('a non-lethal impact pulse stays attached after same-frame enemy movement', () => {
@@ -909,7 +967,10 @@ test('a non-lethal impact pulse stays attached after same-frame enemy movement',
   tick(state, 0.01);
   const [projectile] = projectileEffects(state);
   tower.cooldown = 999;
-  projectile.impactIn = 0;
+  projectile.currentPosition = 0.68;
+  projectile.progress = (projectile.currentPosition - projectile.from)
+    / (projectile.destinationPosition - projectile.from);
+  projectile.impactIn = projectile.travelTime * (1 - projectile.progress);
 
   tick(state, 0.2);
 
@@ -923,7 +984,7 @@ test('pause freezes projectile flight and impact timing', () => {
   freezeSpawns(state);
   state.towers = [];
   state.effects = [];
-  const target = testEnemy(polynomial([term(1, 3)]), { id: 'paused-impact' });
+  const target = testEnemy(polynomial([term(1, 3)]), { id: 'paused-impact', speed: 0 });
   const tower = configuredTower('derivative');
   state.enemies = [target];
   state.towers = [tower];
@@ -935,6 +996,7 @@ test('pause freezes projectile flight and impact timing', () => {
   const impactBeforePause = projectile.impactIn;
   const ttlBeforePause = projectile.ttl;
   const progressBeforePause = projectile.progress;
+  const collisionBeforePause = stationaryLaneCollisionIn(projectile, target);
 
   assert.equal(togglePause(state), true);
   advanceBy(state, 1);
@@ -945,7 +1007,7 @@ test('pause freezes projectile flight and impact timing', () => {
   assert.equal(projectile.impactResolved, false);
 
   assert.equal(togglePause(state), true);
-  advanceBy(state, impactBeforePause - 0.001);
+  advanceBy(state, collisionBeforePause - 0.001);
   assert.equal(formatExpression(target.expression), 'x^3');
   assert.equal(projectile.status, 'flying');
   advanceBy(state, 0.002);
@@ -957,7 +1019,7 @@ test('concurrent projectiles recalculate against the expression at each impact',
   const state = createGame(452);
   freezeSpawns(state);
   state.effects = [];
-  const target = testEnemy(polynomial([term(1, 2)]), { id: 'concurrent-impact' });
+  const target = testEnemy(polynomial([term(1, 2)]), { id: 'concurrent-impact', speed: 0 });
   const firstTower = configuredTower('derivative', undefined, { id: 'tower-derivative-a' });
   const secondTower = configuredTower('derivative', undefined, {
     id: 'tower-derivative-b', column: 1, position: 0.3,
@@ -971,10 +1033,13 @@ test('concurrent projectiles recalculate against the expression at each impact',
   assert.equal(formatExpression(target.expression), 'x^2');
   firstTower.cooldown = 999;
   secondTower.cooldown = 999;
+  const collisionTimes = projectiles.map((projectile) => (
+    stationaryLaneCollisionIn(projectile, target)
+  ));
 
-  advanceBy(state, GAMEPLAY_CONFIG.effects.projectileTravelSeconds.lane - 0.001);
+  advanceBy(state, Math.min(...collisionTimes) - 0.001);
   assert.equal(formatExpression(target.expression), 'x^2');
-  advanceBy(state, 0.002);
+  advanceBy(state, Math.max(...collisionTimes) - Math.min(...collisionTimes) + 0.002);
   assert.equal(formatExpression(target.expression), '2');
   assert.ok(projectiles.every((projectile) => projectile.impactResolved));
 
@@ -984,65 +1049,173 @@ test('concurrent projectiles recalculate against the expression at each impact',
   assert.equal(state.logs.length, logsAfterImpacts);
 });
 
-test('a later projectile finishes its route after an earlier impact kills the target', () => {
+test('a later lane projectile continues past a removed target and hits the next enemy', () => {
   const state = createGame(453);
   freezeSpawns(state);
   state.energyClock = -1000;
   state.effects = [];
-  const target = testEnemy(polynomial(7), { id: 'missed-target', speed: 0 });
-  const firstTower = configuredTower('derivative', undefined, { id: 'tower-derivative-a' });
-  state.enemies = [target];
-  state.towers = [firstTower];
+  const target = testEnemy(polynomial(7), { id: 'first-target', position: 0.62, speed: 0 });
+  const nextTarget = testEnemy(polynomial([term(1, 2)]), {
+    id: 'next-target', position: 0.84, speed: 0,
+  });
+  const rearTower = configuredTower('derivative', undefined, {
+    id: 'tower-derivative-rear', column: 0, position: 0.2,
+  });
+  const forwardTower = configuredTower('derivative', undefined, {
+    id: 'tower-derivative-forward', column: 2, position: 0.4,
+  });
+  state.enemies = [target, nextTarget];
+  state.selectedEnemyId = target.id;
+  state.towers = [rearTower, forwardTower];
 
   tick(state, 0.01);
-  const [killingProjectile] = projectileEffects(state);
-  firstTower.cooldown = 999;
-
-  advanceBy(state, killingProjectile.travelTime / 3);
-  const secondTower = configuredTower('derivative', undefined, {
-    id: 'tower-derivative-b', column: 1, position: 0.3,
-  });
-  state.towers.push(secondTower);
-  tick(state, Math.min(0.01, killingProjectile.travelTime / 100));
-  const laterProjectile = projectileEffects(state).find((effect) => (
-    effect.sourceTowerId === secondTower.id
+  const killingProjectile = projectileEffects(state).find((effect) => (
+    effect.sourceTowerId === forwardTower.id
   ));
-  secondTower.cooldown = 999;
+  const laterProjectile = projectileEffects(state).find((effect) => (
+    effect.sourceTowerId === rearTower.id
+  ));
+  rearTower.cooldown = 999;
+  forwardTower.cooldown = 999;
   const energyAfterLaunch = state.energy;
-  const impactDelta = Math.min(0.001, killingProjectile.travelTime / 100);
+  const firstCollision = stationaryLaneCollisionIn(killingProjectile, target);
 
-  advanceBy(state, killingProjectile.impactIn + impactDelta);
+  advanceBy(state, firstCollision + 0.001);
   assert.equal(state.kills, 1);
   assert.equal(state.energy, energyAfterLaunch + target.reward);
   assert.equal(killingProjectile.status, 'impacted');
-  assert.equal(state.enemies.length, 0);
+  assert.equal(target.dead, true);
+  assert.equal(formatExpression(target.expression), '0');
+  assert.equal(state.selectedEnemyId, null);
+  assert.equal(state.enemies.includes(target), false);
+  assert.equal(state.enemies.includes(nextTarget), true);
+  assert.equal(formatExpression(nextTarget.expression), 'x^2');
   assert.equal(state.effects.includes(laterProjectile), true);
   assert.equal(laterProjectile.status, 'flying');
   assert.equal(laterProjectile.impactResolved, false);
   assert.equal(laterProjectile.missed, false);
+  assert.equal(laterProjectile.targetId, nextTarget.id);
   assert.ok(laterProjectile.progress > 0 && laterProjectile.progress < 1);
 
-  const remainingFlight = laterProjectile.impactIn;
-  const missDelta = Math.min(0.001, remainingFlight / 100);
-  advanceBy(state, remainingFlight - missDelta);
+  const secondCollision = stationaryLaneCollisionIn(laterProjectile, nextTarget);
+  advanceBy(state, secondCollision - 0.001);
   assert.equal(state.effects.includes(laterProjectile), true);
   assert.equal(laterProjectile.status, 'flying');
-  advanceBy(state, missDelta * 2);
-  assert.equal(laterProjectile.status, 'missed');
-  assert.equal(laterProjectile.impactResolved, true);
-  assert.equal(laterProjectile.missed, true);
-  assert.equal(laterProjectile.progress, 1);
-  assert.equal(state.effects.includes(laterProjectile), true);
+  assert.equal(formatExpression(nextTarget.expression), 'x^2');
 
-  const logsAfterMiss = state.logs.length;
-  advanceBy(state, laterProjectile.ttl + missDelta);
-  assert.equal(state.effects.includes(laterProjectile), false);
+  advanceBy(state, 0.002);
+  assert.equal(laterProjectile.status, 'impacted');
+  assert.equal(laterProjectile.impactResolved, true);
+  assert.equal(laterProjectile.missed, false);
+  assert.equal(laterProjectile.progress, 1);
+  assert.equal(laterProjectile.impactTargetId, nextTarget.id);
+  assert.equal(laterProjectile.position, nextTarget.position);
+  assert.equal(state.effects.includes(laterProjectile), true);
+  assert.equal(state.enemies.includes(target), false);
+  assert.equal(state.enemies.includes(nextTarget), true);
+  assert.equal(formatExpression(nextTarget.expression), '2x');
   assert.equal(state.kills, 1);
   assert.equal(state.energy, energyAfterLaunch + target.reward);
-  assert.equal(state.logs.length, logsAfterMiss);
 });
 
-test('the final enemy waits for an orphaned projectile before advancing the wave', () => {
+test('same-frame lane collisions recompute after the first projectile removes its target', () => {
+  const state = createGame(462);
+  freezeSpawns(state);
+  state.effects = [];
+  const firstTarget = testEnemy(polynomial(7), {
+    id: 'same-frame-first', position: 0.5, speed: 0,
+  });
+  const nextTarget = testEnemy(polynomial([term(1, 2)]), {
+    id: 'same-frame-next', position: 0.51, speed: 0,
+  });
+  const rearTower = configuredTower('derivative', undefined, {
+    id: 'same-frame-rear', column: 0, position: 0.2,
+  });
+  const forwardTower = configuredTower('derivative', undefined, {
+    id: 'same-frame-forward', column: 2, position: 0.4,
+  });
+  state.enemies = [firstTarget, nextTarget];
+  state.towers = [rearTower, forwardTower];
+
+  tick(state, 0.01);
+  const firstProjectile = projectileEffects(state).find((effect) => (
+    effect.sourceTowerId === forwardTower.id
+  ));
+  const followingProjectile = projectileEffects(state).find((effect) => (
+    effect.sourceTowerId === rearTower.id
+  ));
+  rearTower.cooldown = 999;
+  forwardTower.cooldown = 999;
+  setLaneProjectilePosition(firstProjectile, 0.49);
+  setLaneProjectilePosition(followingProjectile, 0.48);
+
+  tick(state, 0.2);
+
+  assert.equal(firstProjectile.status, 'impacted');
+  assert.equal(firstProjectile.impactTargetId, firstTarget.id);
+  assert.equal(firstTarget.dead, true);
+  assert.equal(state.enemies.includes(firstTarget), false);
+  assert.equal(followingProjectile.status, 'impacted');
+  assert.equal(followingProjectile.impactTargetId, nextTarget.id);
+  assert.equal(formatExpression(nextTarget.expression), '2x');
+});
+
+test('swept lane collision catches a moving enemy during a fast simulation frame', () => {
+  const state = createGame(463);
+  freezeSpawns(state);
+  state.speed = 2;
+  state.effects = [];
+  const target = testEnemy(polynomial([term(1, 2)]), {
+    id: 'swept-moving-target', position: 0.47, speed: 0.1,
+  });
+  const tower = configuredTower('derivative');
+  state.enemies = [target];
+  state.towers = [tower];
+
+  tick(state, 0.01);
+  const [projectile] = projectileEffects(state);
+  tower.cooldown = 999;
+  setLaneProjectilePosition(projectile, 0.38);
+
+  tick(state, 0.2);
+
+  assert.equal(projectile.status, 'impacted');
+  assert.equal(projectile.impactTargetId, target.id);
+  assert.equal(formatExpression(target.expression), '2x');
+});
+
+test('a falling projectile stays locked to its removed target and never hits a replacement', () => {
+  const state = createGame(464);
+  state.chapterIndex = 5;
+  freezeSpawns(state);
+  state.towers = [];
+  state.effects = [];
+  state.operatorQueue = [];
+  const removedTarget = testEnemy(exponential(1), {
+    id: 'removed-drop-target', row: 1, position: 0.65, speed: 0,
+  });
+  const replacement = testEnemy(exponential(1), {
+    id: 'replacement-drop-target', row: 1, position: 0.65, speed: 0,
+  });
+  state.enemies = [removedTarget, replacement];
+  const cardId = addArsenalCard(state, 'reflect');
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(applyTargetOperator(state, removedTarget.id), true);
+  const [projectile] = projectileEffects(state);
+
+  removedTarget.dead = true;
+  tick(state, 0.1);
+  assert.equal(state.enemies.includes(removedTarget), false);
+  assert.equal(projectile.targetId, removedTarget.id);
+  assert.equal(projectile.status, 'flying');
+
+  advanceBy(state, projectile.impactIn + 0.001);
+  assert.equal(projectile.status, 'missed');
+  assert.equal(projectile.missed, true);
+  assert.equal(formatExpression(replacement.expression), 'e^x');
+});
+
+test('the final enemy disappears while an orphaned lane projectile flies out of the battlefield', () => {
   const state = createGame(459);
   state.chapterIndex = CHAPTERS.length;
   state.endlessRound = 1;
@@ -1051,26 +1224,34 @@ test('the final enemy waits for an orphaned projectile before advancing the wave
   state.nextSpawnIndex = 0;
   state.effects = [];
   const target = testEnemy(polynomial(7), { id: 'last-orphan-target', speed: 0, reward: 0 });
-  const firstTower = configuredTower('derivative', undefined, { id: 'last-shot-a' });
-  const secondTower = configuredTower('derivative', undefined, {
-    id: 'last-shot-b', column: 1, position: 0.3,
+  const rearTower = configuredTower('derivative', undefined, {
+    id: 'last-shot-rear', column: 0, position: 0.2,
+  });
+  const forwardTower = configuredTower('derivative', undefined, {
+    id: 'last-shot-forward', column: 2, position: 0.4,
   });
   state.enemies = [target];
-  state.towers = [firstTower, secondTower];
+  state.towers = [rearTower, forwardTower];
 
   tick(state, 0.01);
-  const [killingProjectile, laterProjectile] = projectileEffects(state);
-  firstTower.cooldown = 999;
-  secondTower.cooldown = 999;
-  const linger = GAMEPLAY_CONFIG.effects.projectileImpactLingerSeconds;
-  laterProjectile.impactIn = killingProjectile.impactIn + linger + 0.2;
-  laterProjectile.travelTime = laterProjectile.impactIn;
-  laterProjectile.ttl = laterProjectile.impactIn + linger;
+  const killingProjectile = projectileEffects(state).find((effect) => (
+    effect.sourceTowerId === forwardTower.id
+  ));
+  const laterProjectile = projectileEffects(state).find((effect) => (
+    effect.sourceTowerId === rearTower.id
+  ));
+  rearTower.cooldown = 999;
+  forwardTower.cooldown = 999;
+  const firstCollision = stationaryLaneCollisionIn(killingProjectile, target);
 
-  advanceBy(state, killingProjectile.impactIn + 0.001);
+  advanceBy(state, firstCollision + 0.001);
   assert.equal(state.kills, 1);
   assert.equal(killingProjectile.status, 'impacted');
   assert.equal(laterProjectile.status, 'flying');
+  assert.equal(state.enemies.includes(target), false);
+  assert.equal(target.dead, true);
+  assert.equal(formatExpression(target.expression), '0');
+  assert.equal(laterProjectile.targetId, null);
   assert.equal(state.phase, 'running');
   assert.equal(state.endlessRound, 1);
 
@@ -1078,17 +1259,22 @@ test('the final enemy waits for an orphaned projectile before advancing the wave
   assert.equal(state.effects.includes(killingProjectile), false);
   assert.equal(state.effects.includes(laterProjectile), true);
   assert.equal(laterProjectile.status, 'flying');
+  assert.equal(state.enemies.length, 0);
   assert.equal(state.phase, 'running');
   assert.equal(state.endlessRound, 1);
 
-  advanceBy(state, laterProjectile.impactIn + 0.001);
-  assert.equal(laterProjectile.status, 'missed');
+  advanceBy(state, laterProjectile.impactIn - 0.001);
+  assert.equal(laterProjectile.status, 'flying');
   assert.equal(state.effects.includes(laterProjectile), true);
+  assert.ok(laterProjectile.currentPosition > 1);
   assert.equal(state.phase, 'running');
 
-  advanceBy(state, laterProjectile.ttl + 0.001);
+  advanceBy(state, 0.002);
+  assert.equal(laterProjectile.status, 'exited');
+  assert.equal(state.effects.includes(laterProjectile), false);
   assert.equal(state.phase, 'preparing');
   assert.equal(state.endlessRound, 2);
+  assert.equal(state.enemies.length, 0);
 });
 
 test('a due projectile misses an enemy at the base before its body damage leaks', () => {
@@ -1197,7 +1383,9 @@ test('a projectile arriving before the base crossing in the same frame hits firs
   assert.equal(projectile.impactResolved, true);
   assert.equal(projectile.missed, false);
   assert.equal(state.baseHp, baseHpBefore);
-  assert.equal(state.enemies.length, 0);
+  assert.equal(target.dead, true);
+  assert.equal(formatExpression(target.expression), '0');
+  assert.equal(state.enemies.includes(target), false);
   assert.equal(state.kills, 1);
   assert.equal(state.energy, energyAfterLaunch + target.reward);
 });
@@ -1238,7 +1426,7 @@ test('the final impact pulse finishes before endless advances without stale dead
   state.nextSpawnIndex = 0;
   state.towers = [];
   state.effects = [];
-  const target = testEnemy(polynomial(7), { id: 'last-impact-target', reward: 0 });
+  const target = testEnemy(polynomial(7), { id: 'last-impact-target', reward: 0, speed: 0 });
   const tower = configuredTower('derivative');
   state.enemies = [target];
   state.towers = [tower];
@@ -1247,7 +1435,8 @@ test('the final impact pulse finishes before endless advances without stale dead
   tick(state, 0.01);
   const [projectile] = projectileEffects(state);
   tower.cooldown = 999;
-  advanceBy(state, projectile.impactIn - 0.001);
+  const collisionIn = stationaryLaneCollisionIn(projectile, target);
+  advanceBy(state, collisionIn - 0.001);
   state.energyClock = 4.999;
   state.operatorCooldown = 0.001;
   state.formulaCooldown = 0.001;
@@ -1272,6 +1461,8 @@ test('the final impact pulse finishes before endless advances without stale dead
 
   assert.equal(state.kills, 1);
   assert.equal(state.enemies.some((enemy) => !enemy.dead), false);
+  assert.equal(state.enemies.includes(target), false);
+  assert.equal(formatExpression(target.expression), '0');
   assert.equal(projectile.status, 'impacted');
   assert.ok(projectile.ttl >= 0.299 && projectile.ttl <= 0.301);
   assert.equal(state.phase, 'running');
@@ -1357,21 +1548,25 @@ test('global partial differentiation hits each live enemy at its staggered impac
   assert.equal(projectiles[1].impactResolved, true);
 });
 
-test('tower errors are evaluated against the active shield layer', () => {
+test('parameter scroll preflight uses the active shield and preserves an invalid scroll', () => {
   const state = createGame(23);
+  state.chapterIndex = 5;
   freezeSpawns(state);
   state.towers = [];
+  state.operatorQueue = [];
   const target = testEnemy(polynomial([term(1, 1)]), {
     affixes: ['shield'],
     shieldExpression: polynomial([term(1, -1)]),
     shieldActive: true,
   });
-  const tower = configuredTower('evaluateTower', 0);
   state.enemies.push(target);
-  state.towers.push(tower);
-  tick(state, 0.01);
-  assert.equal(tower.active, false);
-  assert.equal(tower.fireFlash, 0);
+  const cardId = addConfiguredScroll(state, 'evaluateTower', { parameter: 0 });
+  const energyBefore = state.energy;
+
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(applyTargetOperator(state, target.id), false);
+  assert.equal(state.operatorQueue.some((item) => item.id === cardId), true);
+  assert.equal(state.energy, energyBefore);
   assert.equal(formatExpression(target.expression), 'x');
   assert.equal(formatExpression(target.shieldExpression), 'x^-1');
   assert.equal(projectileEffects(state).length, 0);
@@ -1431,14 +1626,15 @@ test('tower hits transform a shield to zero before the next hit reaches the body
     tower.cooldown = 999;
     target.speed = 0;
     assert.ok(projectile);
-    if (resolve) resolve(projectile);
-    else advanceBy(state, projectile.impactIn + 0.001);
+    const collisionIn = stationaryLaneCollisionIn(projectile, target);
+    if (resolve) resolve(projectile, collisionIn);
+    else advanceBy(state, collisionIn + 0.001);
   };
 
-  fire((projectile) => {
+  fire((projectile, collisionIn) => {
     assert.equal(formatExpression(target.shieldExpression), 'x^2');
     assert.equal(formatExpression(target.expression), 'x^2');
-    advanceBy(state, projectile.impactIn - 0.001);
+    advanceBy(state, collisionIn - 0.001);
     assert.equal(formatExpression(target.shieldExpression), 'x^2');
     assert.equal(formatExpression(target.expression), 'x^2');
     advanceBy(state, 0.002);
@@ -1466,7 +1662,11 @@ test('tower hits transform a shield to zero before the next hit reaches the body
   assert.equal(state.kills, 1);
   assert.equal(state.energy, energyBefore + 24);
   assert.equal(state.enemies.length, 2);
-  assert.ok(state.enemies.every((enemy) => enemy.shieldExpression === null));
+  assert.equal(target.dead, true);
+  assert.equal(formatExpression(target.expression), '0');
+  const splitChildren = state.enemies;
+  assert.equal(splitChildren.length, 2);
+  assert.ok(splitChildren.every((enemy) => enemy.shieldExpression === null));
   assert.equal(state.effects.filter((effect) => effect.type === 'split').length, 1);
 });
 
@@ -1540,7 +1740,12 @@ test('global partial preview and resolution operate on one active layer per enem
   assert.equal(formatExpression(progressingShield.expression), 'x^3');
   assert.equal(breakingShield.shieldExpression, null);
   assert.equal(formatExpression(breakingShield.expression), 'x^2');
-  assert.deepEqual(state.enemies.map((enemy) => enemy.id), ['shield-progress', 'shield-break']);
+  assert.deepEqual(
+    state.enemies.map((enemy) => enemy.id),
+    ['shield-progress', 'shield-break'],
+  );
+  assert.equal(exposedBody.dead, true);
+  assert.equal(formatExpression(exposedBody.expression), '0');
   assert.equal(state.kills, 1);
   assert.equal(state.energy, energyBefore - OPERATORS.partial.cost + exposedBody.reward);
   assert.equal(projectileEffects(state).length, 3);
@@ -1611,35 +1816,32 @@ test('a divergent limit is evaluated against the shield and does not remove it',
   assert.equal(state.effects.filter((effect) => effect.type === 'divergent').length, 1);
 });
 
-test('Euler tower compatibility follows the shield before the hidden body', () => {
+test('an Euler scroll clears only the active shield layer and is then consumed', () => {
   const state = createGame(245);
   state.chapterIndex = 4;
   freezeSpawns(state);
   state.towers = [];
   state.effects = [];
+  state.operatorQueue = [];
   const target = testEnemy(exponential(1), {
     family: 'exponential',
     shieldExpression: polynomial([term(1, -1)]),
     shieldActive: true,
     affixes: ['shield'],
   });
-  const tower = configuredTower('eulerTower', 1);
   state.enemies.push(target);
-  state.towers.push(tower);
+  const cardId = addConfiguredScroll(state, 'eulerTower', { parameter: 1 });
 
-  tick(state, 0.01);
+  assert.equal(selectArsenalItem(state, cardId), true);
+  assert.equal(applyTargetOperator(state, target.id), true);
   assert.equal(formatExpression(target.shieldExpression), 'x^-1');
   const [projectile] = projectileEffects(state);
-  tower.cooldown = 999;
   advanceBy(state, projectile.impactIn + 0.001);
   assert.equal(target.shieldExpression, null);
   assert.equal(formatExpression(target.expression), 'e^x');
-  assert.equal(projectileEffects(state).length, 1);
-
-  tower.cooldown = 0;
-  tick(state, 0.01);
-  assert.equal(formatExpression(target.expression), 'e^x');
-  assert.equal(projectileEffects(state).length, 1);
+  assert.equal(projectile.status, 'impacted');
+  assert.equal(state.operatorQueue.some((item) => item.id === cardId), false);
+  assert.equal(state.towers.length, 0);
 });
 
 test('a split enemy creates two unmodified non-recursive children', () => {
@@ -1658,9 +1860,11 @@ test('a split enemy creates two unmodified non-recursive children', () => {
   advanceBy(state, projectile.impactIn + 0.001);
   assert.equal(state.kills, 1);
   assert.equal(state.enemies.length, 2);
-  assert.ok(state.enemies.every((enemy) => enemy.affixes.length === 0));
-  assert.ok(state.enemies.every((enemy) => enemy.shieldExpression === null));
-  assert.ok(state.enemies.every((enemy) => enemy.splitExpressions.length === 0));
+  const children = state.enemies;
+  assert.equal(children.length, 2);
+  assert.ok(children.every((enemy) => enemy.affixes.length === 0));
+  assert.ok(children.every((enemy) => enemy.shieldExpression === null));
+  assert.ok(children.every((enemy) => enemy.splitExpressions.length === 0));
 });
 
 test('reflect then limit consumes two cards and eliminates e^x', () => {
@@ -1684,6 +1888,8 @@ test('reflect then limit consumes two cards and eliminates e^x', () => {
   projectile = projectileEffects(state).find((effect) => effect.operatorId === 'limit');
   advanceBy(state, projectile.impactIn + 0.001);
   assert.equal(state.enemies.length, 0);
+  assert.equal(target.dead, true);
+  assert.equal(formatExpression(target.expression), '0');
   assert.equal(state.operatorQueue.length, 0);
 });
 

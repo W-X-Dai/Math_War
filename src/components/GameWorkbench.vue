@@ -221,11 +221,11 @@ const supplySourceClass = (source) => ({
           @click="$emit('prepare-assembly')"
         >{{ storedFull ? `常數庫已滿（${STORED_CONSTANT_CAPACITY}/${STORED_CONSTANT_CAPACITY}）` : '組裝並保存' }}</button>
       </template>
-      <p v-else>兩條 queue 都有材料時即可組合；已組裝常數會跨章節保存。</p>
+      <p v-else>兩條 queue 都有材料時即可組合；已組裝常數會在同一關的正式段之間保存。</p>
       <div v-if="selectedStoredConstant" class="selected-constant-hint">
         <span>已選常數</span>
         <strong>{{ formatValue(selectedStoredConstant.value) }}</strong>
-        <small>點擊戰場上的參數塔安裝</small>
+        <small>點擊軍械 Queue 中的參數捲軸刻寫</small>
       </div>
     </section>
 

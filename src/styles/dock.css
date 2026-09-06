@@ -140,6 +140,26 @@
   border-style: dashed;
 }
 
+.operator-card.is-parameter-scroll {
+  border-style: solid;
+  background:
+    linear-gradient(90deg, rgba(110, 70, 28, 0.18), transparent 18%, transparent 82%, rgba(110, 70, 28, 0.18)),
+    var(--ink-panel);
+}
+
+.operator-card.is-parameter-scroll:not(.is-scroll-ready) .operator-name b {
+  color: var(--brass);
+}
+
+.operator-card.is-parameter-scroll.is-scroll-ready {
+  border-color: var(--mint);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.46), inset 0 0 24px rgba(127, 211, 179, 0.12);
+}
+
+.operator-card.is-parameter-scroll.is-scroll-ready .operator-name b {
+  color: var(--mint);
+}
+
 .operator-card:disabled {
   cursor: not-allowed;
 }
@@ -232,7 +252,6 @@
 
 /* 3 × 2 tower atlas: derivative, subtract, second / integral, shield, partial. */
 .tower-art-derivative,
-.tower-art-subtract,
 .tower-art-second,
 .tower-art-integral,
 .tower-art-shield,
@@ -243,7 +262,6 @@
 }
 
 .tower-art-derivative { background-position: 0 0; }
-.tower-art-subtract { background-position: 50% 0; }
 .tower-art-second { background-position: 100% 0; }
 .tower-art-integral { background-position: 0 100%; }
 .tower-art-shield { background-position: 50% 100%; }
@@ -261,6 +279,32 @@
 .combo-art-integral { background-position: 0 0; }
 .combo-art-reflect { background-position: 50% 0; }
 .combo-art-limit { background-position: 100% 0; }
+
+.parameter-scroll-art {
+  width: calc(100% - 22px);
+  min-height: 74%;
+  margin: 11% 11px;
+  border: 2px solid #a97937;
+  border-radius: 45% 8px 45% 8px / 9px 45% 9px 45%;
+  background:
+    linear-gradient(90deg, rgba(103, 58, 20, 0.28), transparent 14%, transparent 86%, rgba(103, 58, 20, 0.28)),
+    repeating-linear-gradient(0deg, transparent 0 14px, rgba(103, 58, 20, 0.16) 14px 15px),
+    #e6c987;
+  box-shadow: inset 0 0 18px rgba(83, 45, 16, 0.38), 0 8px 9px rgba(0, 0, 0, 0.48);
+  transform: rotate(-2deg);
+}
+
+.parameter-scroll-art::before {
+  position: absolute;
+  inset: 19% 16%;
+  display: grid;
+  place-items: center;
+  border-block: 1px solid rgba(87, 48, 18, 0.48);
+  color: #513016;
+  content: "f(k)";
+  font: italic 800 clamp(17px, 1.6cqw, 25px) / 1 var(--font-math);
+  text-shadow: 0 1px rgba(255, 244, 194, 0.6);
+}
 
 .arsenal-cooldown {
   display: grid;

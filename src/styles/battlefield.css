@@ -287,64 +287,6 @@
   white-space: nowrap;
 }
 
-.tower-slot {
-  position: absolute;
-  z-index: 4;
-  top: -6px;
-  right: -5px;
-  display: grid;
-  min-width: 46px;
-  max-width: 92px;
-  height: 30px;
-  padding: 3px;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--brass-dark);
-  border-radius: 2px;
-  background: rgba(2, 13, 15, 0.92);
-  color: var(--parchment-dim);
-  font: 700 0.7rem/1 var(--font-math);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.54);
-}
-
-.tower:not(.is-configurable) .tower-slot {
-  display: none;
-}
-
-.tower-slot.is-empty,
-.tower.is-configurable:not(.is-filled) .tower-slot {
-  border-style: dashed;
-  color: var(--brass);
-}
-
-.tower-slot.is-filled,
-.tower.is-filled .tower-slot {
-  border-color: var(--mint);
-  color: var(--mint);
-  box-shadow: 0 0 10px rgba(127, 211, 179, 0.34), 0 3px 8px rgba(0, 0, 0, 0.54);
-}
-
-.tower.is-configurable {
-  cursor: default;
-}
-
-.tower.is-awaiting-assembly {
-  cursor: cell;
-}
-
-.tower.is-awaiting-assembly:hover,
-.tower.is-awaiting-assembly:focus-visible,
-.is-awaiting-assembly .tower.is-configurable {
-  filter: drop-shadow(0 0 13px rgba(127, 211, 179, 0.8)) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
-}
-
-.tower.is-tutorial-preset.is-configurable,
-.tower.is-tutorial-preset.is-configurable:hover,
-.tower.is-tutorial-preset.is-configurable:focus-visible {
-  cursor: default;
-  filter: drop-shadow(0 0 9px rgba(127, 211, 179, 0.42)) drop-shadow(0 7px 5px rgba(0, 0, 0, 0.58));
-}
-
 .battlefield.has-recycle-targeting .grid-cell {
   cursor: default;
 }
@@ -419,15 +361,6 @@
 .enemy:focus-visible {
   outline: 0;
   box-shadow: none;
-}
-
-.enemy-leave-active {
-  transition: opacity 320ms ease, transform 320ms ease;
-}
-
-.enemy.is-vanishing {
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(0.45);
 }
 
 .enemy-expression-stack {
@@ -772,6 +705,19 @@
 .projectile--resonance .projectile__glyph::before {
   border: 3px double var(--projectile-color);
   border-radius: 999px;
+}
+
+.projectile.is-drop:is(
+  .projectile--subtract,
+  .projectile--definite-integral,
+  .projectile--evaluation,
+  .projectile--euler,
+  .projectile--resonance
+) .projectile__glyph::before {
+  border: 2px double var(--projectile-color);
+  border-radius: 45% 7px 45% 7px / 7px 45% 7px 45%;
+  clip-path: none;
+  box-shadow: inset 0 0 10px color-mix(in srgb, var(--projectile-color) 34%, transparent);
 }
 
 .projectile--reflection {
